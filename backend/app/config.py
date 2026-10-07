@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ROOT = Path(__file__).resolve().parents[2]  # repo root; .env may live here or in backend/
@@ -7,7 +8,8 @@ _ROOT = Path(__file__).resolve().parents[2]  # repo root; .env may live here or 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(_ROOT / ".env", _ROOT / "backend" / ".env"), extra="ignore"
+        env_file=(_ROOT / ".env", _ROOT / "backend" / ".env"), extra="ignore",
+        env_file_encoding="utf-8-sig",  # Windows Notepad may add a BOM
     )
 
     database_url: str = "postgresql+psycopg://marketing:marketing@localhost:5432/marketing_os"
@@ -26,6 +28,15 @@ class Settings(BaseSettings):
     canva_api_base: str = "https://api.canva.com/rest/v1"
     canva_template_map: dict = {}  # {"offer_square": {"brand_template_id": "...", "fields": {"headline": "HEADLINE"}}}
     canva_poll_timeout_s: int = 60
+
+    @field_validator("encryption_key", "canva_client_id", "canva_client_secret", "anthropic_api_key", mode="before")
+    @classmethod
+    def _clean_secret(cls, v):
+        """Tolerate quotes, stray whitespace and inline '# comments' pasted into .env."""
+        if not isinstance(v, str):
+            return v
+        v = v.split(" #")[0].strip().strip("\"'").strip()
+        return v
 
 
 settings = Settings()

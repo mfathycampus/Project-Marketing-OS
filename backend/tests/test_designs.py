@@ -161,3 +161,10 @@ def test_canva_callback_reports_exchange_failure(client, monkeypatch):
     monkeypatch.setattr(oauth, "exchange_code", boom)
     r = client.get("/api/v1/canva/callback", params={"code": "c", "state": "st2"})
     assert r.status_code == 502 and "invalid_client" in r.json()["detail"]
+
+
+def test_settings_tolerate_quoted_and_commented_keys():
+    from app.config import Settings
+
+    s = Settings(encryption_key='  "abc="   # python -c ...', _env_file=None)
+    assert s.encryption_key == "abc="
