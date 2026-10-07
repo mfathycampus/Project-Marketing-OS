@@ -4,9 +4,9 @@ Multi-project marketing content platform: Claude (strategy/copy) → design prov
 
 ## Run (backend)
 ```
-docker compose up -d db
+# local quick start uses sqlite; for Postgres: docker compose up -d db
 cd backend && pip install -e .[dev]
-cp ../.env.example ../.env   # set ANTHROPIC_API_KEY
+cp .env.example .env   # repo root; set ANTHROPIC_API_KEY
 alembic upgrade head
 uvicorn app.main:app --reload
 pytest

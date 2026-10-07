@@ -1,8 +1,14 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_ROOT = Path(__file__).resolve().parents[2]  # repo root; .env may live here or in backend/
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(_ROOT / ".env", _ROOT / "backend" / ".env"), extra="ignore"
+    )
 
     database_url: str = "postgresql+psycopg://marketing:marketing@localhost:5432/marketing_os"
     anthropic_api_key: str = ""
