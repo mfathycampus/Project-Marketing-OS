@@ -23,7 +23,9 @@ def main() -> None:
         if not path.exists():
             continue
         raw = path.read_bytes()
-        print(f"{path.name} bytes: BOM={raw[:3] == b'\\xef\\xbb\\xbf'} utf16={raw[:2] in (b'\\xff\\xfe', b'\\xfe\\xff')}")
+        has_bom = raw[:3] == b"\xef\xbb\xbf"
+        is_utf16 = raw[:2] in (b"\xff\xfe", b"\xfe\xff")
+        print(f"{path.name} bytes: BOM={has_bom} utf16={is_utf16}")
         for line in raw.decode("utf-8-sig", "replace").splitlines():
             if line.startswith("ENCRYPTION_KEY"):
                 val = line.split("=", 1)[1] if "=" in line else ""

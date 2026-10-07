@@ -175,3 +175,16 @@ def test_encryption_accepts_malformed_key_by_deriving(monkeypatch):
 
     monkeypatch.setattr(settings, "encryption_key", "xm06qvBVllUnOJevxijv6NGI6MVxdJeEtX6zG7ePUSs")  # 43 chars
     assert crypto.decrypt(crypto.encrypt("token")) == "token"
+
+
+def test_canva_service_handles_naive_expiry_from_sqlite(session, monkeypatch):
+    from datetime import datetime, timedelta
+
+    from app.designs.canva import service as canva_service
+    from app.models import CanvaConnection
+
+    monkeypatch.setattr(settings, "encryption_key", "k" * 32)
+    conn = canva_service.save_tokens(session, {"access_token": "a", "refresh_token": "r", "expires_in": 3600})
+    conn.expires_at = datetime.utcnow() + timedelta(hours=1)  # naive, as SQLite returns it
+    session.commit()
+    assert canva_service.get_client(session).headers["Authorization"] == "Bearer a"

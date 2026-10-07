@@ -1,5 +1,5 @@
 """Connection lifecycle: store encrypted tokens, refresh, capability check."""
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -10,6 +10,11 @@ from app.designs.canva.client import CanvaClient, CanvaError
 from app.designs.canva.crypto import decrypt, encrypt
 from app.designs.canva.provider import CanvaProvider
 from app.models import CanvaConnection
+
+
+def _aware(dt: datetime) -> datetime:
+    """SQLite returns naive datetimes; treat them as UTC."""
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def save_tokens(session: Session, tokens: dict, owner_id: str = "default") -> CanvaConnection:
@@ -29,7 +34,7 @@ def get_client(session: Session, owner_id: str = "default") -> CanvaClient:
     conn = session.scalar(select(CanvaConnection).where(CanvaConnection.owner_id == owner_id))
     if conn is None:
         raise CanvaError("Canva is not connected")
-    if conn.expires_at <= utcnow():
+    if _aware(conn.expires_at) <= utcnow():
         # TODO(sprint 3): lock the row (SELECT ... FOR UPDATE) so concurrent workers don't double-refresh
         conn = save_tokens(session, oauth.refresh(decrypt(conn.refresh_token_enc)), owner_id)
     return CanvaClient(decrypt(conn.access_token_enc))
