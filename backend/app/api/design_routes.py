@@ -1,6 +1,8 @@
 import secrets
 import uuid
 
+import httpx
+
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -64,7 +66,16 @@ def canva_callback(code: str, state: str, session: Session = Depends(get_session
     verifier = _pending_oauth.pop(state, None)
     if verifier is None:
         raise HTTPException(400, "invalid or expired state")
-    canva_service.save_tokens(session, oauth.exchange_code(code, verifier))
+    try:
+        tokens = oauth.exchange_code(code, verifier)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(502, f"Canva token exchange failed: {exc.response.status_code} {exc.response.text[:300]}")
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"Canva unreachable: {exc}")
+    try:
+        canva_service.save_tokens(session, tokens)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(500, f"Could not store Canva tokens, check ENCRYPTION_KEY in .env: {exc}")
     return canva_service.status(session)
 
 

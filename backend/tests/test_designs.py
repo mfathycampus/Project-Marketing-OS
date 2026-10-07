@@ -137,3 +137,27 @@ def test_canva_autofill_flow(monkeypatch):
     p = CanvaProvider(canva_client(["autofill"]), MAP, interval_s=0)
     r = p.render(DesignRequest("offer_square", {"headline": "H", "cta": "C"}))
     assert r.png.endswith(b"canva") and r.external_url == "https://canva/d1" and r.external_job_id == "af1"
+
+
+def test_canva_callback_reports_bad_encryption_key(client, monkeypatch):
+    from app.api import design_routes
+
+    design_routes._pending_oauth["st"] = "ver"
+    monkeypatch.setattr(oauth, "exchange_code", lambda code, verifier: {"access_token": "a", "refresh_token": "r"})
+    monkeypatch.setattr(settings, "encryption_key", "not-a-valid-key")
+    r = client.get("/api/v1/canva/callback", params={"code": "c", "state": "st"})
+    assert r.status_code == 500 and "ENCRYPTION_KEY" in r.json()["detail"]
+
+
+def test_canva_callback_reports_exchange_failure(client, monkeypatch):
+    from app.api import design_routes
+
+    design_routes._pending_oauth["st2"] = "ver"
+
+    def boom(code, verifier):
+        raise httpx.HTTPStatusError("x", request=httpx.Request("POST", "https://x"),
+                                    response=httpx.Response(401, text='{"error":"invalid_client"}'))
+
+    monkeypatch.setattr(oauth, "exchange_code", boom)
+    r = client.get("/api/v1/canva/callback", params={"code": "c", "state": "st2"})
+    assert r.status_code == 502 and "invalid_client" in r.json()["detail"]
