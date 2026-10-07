@@ -17,8 +17,18 @@ def main() -> None:
 
         Fernet(key.encode())
         print("  valid Fernet key: YES")
-    except Exception as exc:  # noqa: BLE001
-        print("  valid Fernet key: NO ->", exc)
+    except Exception:  # noqa: BLE001
+        print("  valid Fernet key: NO (app will derive a key from it; still usable if >= 32 chars)")
+    for path in (_ROOT / ".env", _ROOT / "backend" / ".env"):
+        if not path.exists():
+            continue
+        raw = path.read_bytes()
+        print(f"{path.name} bytes: BOM={raw[:3] == b'\\xef\\xbb\\xbf'} utf16={raw[:2] in (b'\\xff\\xfe', b'\\xfe\\xff')}")
+        for line in raw.decode("utf-8-sig", "replace").splitlines():
+            if line.startswith("ENCRYPTION_KEY"):
+                val = line.split("=", 1)[1] if "=" in line else ""
+                print(f"  ENCRYPTION_KEY line: value length {len(val)}, ends with '=': {val.endswith('=')},"
+                      f" non-ascii chars: {sum(ord(c) > 127 for c in val)}")
     for name in ("canva_client_id", "canva_client_secret", "anthropic_api_key"):
         v = getattr(settings, name)
         print(f"{name.upper()}: {'set (%d chars)' % len(v) if v else 'EMPTY'}")

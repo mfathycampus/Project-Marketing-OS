@@ -168,3 +168,10 @@ def test_settings_tolerate_quoted_and_commented_keys():
 
     s = Settings(encryption_key='  "abc="   # python -c ...', _env_file=None)
     assert s.encryption_key == "abc="
+
+
+def test_encryption_accepts_malformed_key_by_deriving(monkeypatch):
+    from app.designs.canva import crypto
+
+    monkeypatch.setattr(settings, "encryption_key", "xm06qvBVllUnOJevxijv6NGI6MVxdJeEtX6zG7ePUSs")  # 43 chars
+    assert crypto.decrypt(crypto.encrypt("token")) == "token"
