@@ -139,12 +139,12 @@ def test_canva_autofill_flow(monkeypatch):
     assert r.png.endswith(b"canva") and r.external_url == "https://canva/d1" and r.external_job_id == "af1"
 
 
-def test_canva_callback_reports_bad_encryption_key(client, monkeypatch):
+def test_canva_callback_reports_missing_encryption_key(client, monkeypatch):
     from app.api import design_routes
 
     design_routes._pending_oauth["st"] = "ver"
     monkeypatch.setattr(oauth, "exchange_code", lambda code, verifier: {"access_token": "a", "refresh_token": "r"})
-    monkeypatch.setattr(settings, "encryption_key", "not-a-valid-key")
+    monkeypatch.setattr(settings, "encryption_key", "")  # missing key
     r = client.get("/api/v1/canva/callback", params={"code": "c", "state": "st"})
     assert r.status_code == 500 and "ENCRYPTION_KEY" in r.json()["detail"]
 
