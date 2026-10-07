@@ -15,6 +15,8 @@ class BrandProfileIn(BaseModel):
     tone: str = ""
     language: str = "ar"
     dialect: str = ""
+    primary_color: str = Field(default="#0F766E", pattern="^#[0-9A-Fa-f]{6}$")
+    secondary_color: str = Field(default="#F59E0B", pattern="^#[0-9A-Fa-f]{6}$")
 
 
 class AudienceIn(BaseModel):

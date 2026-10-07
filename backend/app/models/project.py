@@ -38,6 +38,8 @@ class BrandProfile(Base, IdMixin, TimestampMixin):
     tone: Mapped[str] = mapped_column(String(200), default="")
     language: Mapped[str] = mapped_column(String(10), default="ar")
     dialect: Mapped[str] = mapped_column(String(50), default="")  # e.g. khaleeji, msa
+    primary_color: Mapped[str] = mapped_column(String(9), default="#0F766E")
+    secondary_color: Mapped[str] = mapped_column(String(9), default="#F59E0B")
 
     project: Mapped[Project] = relationship(back_populates="brand_profile")
 

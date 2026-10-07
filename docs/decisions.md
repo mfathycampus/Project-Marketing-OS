@@ -19,3 +19,12 @@ Sprint 1 delivered: projects, Brand Brain, Context Engine, AIOrchestrator.genera
 `ai_runs` audit, prompt caching on the stable brand context), content state machine, Alembic migration.
 
 Content status ends at APPROVED; scheduled/published/failed belong to per-platform publications (Sprint 4).
+
+## Sprint 2 (designs)
+- `DesignProvider` interface; `HtmlRenderer` (Chromium/Playwright, RTL Arabic verified visually) is the default.
+- `DesignService` records `design_jobs` (idempotency key = item + provider + values + brand colors), stores PNG,
+  and moves the content item AI_GENERATED → DESIGN_PENDING → DESIGN_READY (back to AI_GENERATED on failure).
+- Canva adapter (PKCE OAuth, encrypted tokens, capability check, brand-template dataset, autofill job, export)
+  is implemented against **mocked** HTTP only. canva.dev was unreachable from the build sandbox, so endpoint paths
+  and payloads are from memory and MUST be verified against a live Canva app (`/canva/status`) before use.
+- Known gap: Canva refresh uses no row lock yet; polling is synchronous inside the request (worker in Sprint 3).
