@@ -27,6 +27,9 @@ class CanvaClient:
     def capabilities(self) -> list[str]:
         return self._req("GET", "/users/me/capabilities").get("capabilities", [])
 
+    def list_brand_templates(self) -> list[dict]:
+        return self._req("GET", "/brand-templates", params={"dataset": "non_empty"}).get("items", [])
+
     def brand_template_dataset(self, brand_template_id: str) -> dict:
         return self._req("GET", f"/brand-templates/{brand_template_id}/dataset").get("dataset", {})
 

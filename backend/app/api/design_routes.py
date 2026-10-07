@@ -13,7 +13,7 @@ from app.designs.canva import oauth
 from app.designs.canva import service as canva_service
 from app.designs.canva.client import CanvaError
 from app.designs.provider import DesignProvider
-from app.designs.registry import DesignSpecError
+from app.designs.registry import REGISTRY, DesignSpecError
 from app.designs.service import DesignService
 from app.models import ContentItem
 from app.storage.local import LocalStorage
@@ -82,3 +82,28 @@ def canva_callback(code: str, state: str, session: Session = Depends(get_session
 @router.get("/canva/status")
 def canva_status(session: Session = Depends(get_session)):
     return canva_service.status(session)
+
+
+@router.get("/canva/brand-templates")
+def canva_brand_templates(session: Session = Depends(get_session)):
+    """Brand templates that have autofill data fields (id + title only)."""
+    try:
+        items = canva_service.get_client(session).list_brand_templates()
+    except CanvaError as exc:
+        raise HTTPException(502, str(exc))
+    return [{"id": t.get("id"), "title": t.get("title")} for t in items]
+
+
+@router.get("/canva/brand-templates/{template_id}/dataset")
+def canva_template_dataset(template_id: str, template_key: str | None = None,
+                           session: Session = Depends(get_session)):
+    """Data fields of a template plus a ready-to-paste CANVA_TEMPLATE_MAP entry."""
+    try:
+        dataset = canva_service.get_client(session).brand_template_dataset(template_id)
+    except CanvaError as exc:
+        raise HTTPException(502, str(exc))
+    names = {k.lower(): k for k in dataset}
+    spec = REGISTRY.get(template_key or "")
+    fields = {f.name: names[f.name] for f in spec.fields if f.name in names} if spec else {}
+    entry = {template_key: {"brand_template_id": template_id, "fields": fields}} if spec else None
+    return {"fields": {k: v.get("type") for k, v in dataset.items()}, "template_map_entry": entry}

@@ -188,3 +188,19 @@ def test_canva_service_handles_naive_expiry_from_sqlite(session, monkeypatch):
     conn.expires_at = datetime.utcnow() + timedelta(hours=1)  # naive, as SQLite returns it
     session.commit()
     assert canva_service.get_client(session).headers["Authorization"] == "Bearer a"
+
+
+def test_canva_template_discovery_endpoints(client, monkeypatch):
+    from app.api import design_routes
+
+    class FakeClient:
+        def list_brand_templates(self):
+            return [{"id": "BT1", "title": "Offer", "extra": "x"}]
+
+        def brand_template_dataset(self, tid):
+            return {"HEADLINE": {"type": "text"}, "CTA": {"type": "text"}, "LOGO": {"type": "image"}}
+
+    monkeypatch.setattr(design_routes.canva_service, "get_client", lambda session: FakeClient())
+    assert client.get("/api/v1/canva/brand-templates").json() == [{"id": "BT1", "title": "Offer"}]
+    r = client.get("/api/v1/canva/brand-templates/BT1/dataset", params={"template_key": "offer_square"}).json()
+    assert r["template_map_entry"] == {"offer_square": {"brand_template_id": "BT1", "fields": {"headline": "HEADLINE", "cta": "CTA"}}}
