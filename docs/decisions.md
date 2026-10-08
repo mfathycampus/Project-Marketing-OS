@@ -58,3 +58,11 @@ Content status ends at APPROVED; scheduled/published/failed belong to per-platfo
 - Auth failures (code 190 etc.) mark the connection `expired` and fail the publication permanently (no pointless retries).
 - UNVERIFIED against live Meta: the sandbox could not reach developers.facebook.com. Tested with mocked HTTP only.
   Graph version is configurable (`META_GRAPH_VERSION`, default v23.0).
+
+## Multi-platform publishing
+- Content item = one design + one approval. `content_variants` hold per-platform wording (AI-adapted via
+  `AIOrchestrator.adapt_content`, validated against platform limits and forbidden words, logged in `ai_runs`).
+- One `publication` per (item, platform); the publication caption comes from the variant, falling back to the item.
+- Variants lock once their publication is scheduled/published. A platform without a connection stays manual.
+- Instagram guards: public URL required, JPEG conversion, aspect ratio 4:5..1.91:1 checked before calling Meta.
+- AIOrchestrator._run is the shared call/validate/repair/audit path for every LLM operation.

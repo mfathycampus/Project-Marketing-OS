@@ -12,7 +12,8 @@ from app.api import schemas as s
 from app.content import service as content_service
 from app.content.state_machine import ContentStatus, InvalidTransition
 from app.db import get_session
-from app.models import AudienceProfile, BrandProfile, BrandRule, Campaign, ContentItem, Product, Project
+from app.models import (AudienceProfile, BrandProfile, BrandRule, Campaign, ContentItem, ContentVariant,
+                        Product, Project, Publication)
 
 router = APIRouter()
 
@@ -264,3 +265,60 @@ def calendar(project_id: uuid.UUID, start: date, end: date, session: Session = D
         d.campaign_name = cname
         out.append(d)
     return out
+
+
+# ---- Platform variants ----
+PLATFORM_KEYS = ("instagram", "facebook", "tiktok", "linkedin", "x")
+
+
+def _variant(session: Session, variant_id: uuid.UUID) -> ContentVariant:
+    v = session.get(ContentVariant, variant_id)
+    if v is None:
+        raise HTTPException(404, "variant not found")
+    return v
+
+
+def _has_live_publication(session: Session, item_id: uuid.UUID, platform: str) -> bool:
+    return session.scalar(select(Publication.id).where(
+        Publication.content_item_id == item_id, Publication.platform == platform,
+        Publication.status.in_(("scheduled", "publishing", "awaiting_manual", "published")))) is not None
+
+
+@router.post("/content-items/{item_id}/variants", response_model=list[s.VariantApi], status_code=201)
+def add_variants(item_id: uuid.UUID, body: s.VariantsIn, session: Session = Depends(get_session),
+                 llm: LLMProvider = Depends(get_llm)):
+    item = _item(session, item_id)
+    bad = [p for p in body.platforms if p not in PLATFORM_KEYS]
+    if bad:
+        raise HTTPException(422, f"unknown platforms: {bad}")
+    if body.use_ai:
+        try:
+            return AIOrchestrator(session, llm).adapt_content(item_id, body.platforms)
+        except AIGenerationError as exc:
+            raise HTTPException(502, f"AI generation failed: {exc}")
+    existing = {v.platform for v in item.variants} | {item.platform}
+    created = [ContentVariant(content_item_id=item.id, platform=p, caption=item.caption)
+               for p in dict.fromkeys(body.platforms) if p not in existing]
+    session.add_all(created)
+    session.commit()
+    return created
+
+
+@router.patch("/variants/{variant_id}", response_model=s.VariantApi)
+def patch_variant(variant_id: uuid.UUID, body: s.VariantPatch, session: Session = Depends(get_session)):
+    v = _variant(session, variant_id)
+    if _has_live_publication(session, v.content_item_id, v.platform):
+        raise HTTPException(409, "this version is already scheduled or published; cancel its publication first")
+    v.caption = body.caption
+    session.commit()
+    return v
+
+
+@router.delete("/variants/{variant_id}", status_code=204)
+def delete_variant(variant_id: uuid.UUID, session: Session = Depends(get_session)):
+    v = _variant(session, variant_id)
+    if _has_live_publication(session, v.content_item_id, v.platform):
+        raise HTTPException(409, "this version is already scheduled or published; cancel its publication first")
+    session.delete(v)
+    session.commit()
+    return Response(status_code=204)

@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Date, DateTime, ForeignKey, String, Text
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.content.state_machine import ContentStatus
@@ -43,6 +43,8 @@ class ContentItem(Base, IdMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(30), default=ContentStatus.AI_GENERATED.value)
 
     campaign: Mapped[Campaign] = relationship(back_populates="items")
+    variants: Mapped[list["ContentVariant"]] = relationship(
+        back_populates="item", cascade="all, delete-orphan", order_by="ContentVariant.created_at")
 
 
 class ContentStatusHistory(Base, IdMixin):
@@ -53,3 +55,17 @@ class ContentStatusHistory(Base, IdMixin):
     to_status: Mapped[str] = mapped_column(String(30))
     note: Mapped[str] = mapped_column(String(300), default="")
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ContentVariant(Base, IdMixin, TimestampMixin):
+    """Platform-specific wording of a content item. The design/approval belong to the item; the text to the variant."""
+
+    __tablename__ = "content_variants"
+    __table_args__ = (UniqueConstraint("content_item_id", "platform", name="uq_variant_item_platform"),)
+
+    content_item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("content_items.id"), index=True)
+    platform: Mapped[str] = mapped_column(String(30))
+    caption: Mapped[str] = mapped_column(Text, default="")
+    ai_run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("ai_runs.id"), nullable=True)
+
+    item: Mapped[ContentItem] = relationship(back_populates="variants")

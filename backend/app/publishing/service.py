@@ -28,16 +28,28 @@ def local_to_utc(day: date, hhmm: str, tz_name: str) -> datetime:
     return datetime.combine(day, time(h, m), tzinfo=ZoneInfo(tz_name)).astimezone(timezone.utc)
 
 
-def schedule(session: Session, item: ContentItem, when: datetime) -> Publication:
+def platforms_of(item: ContentItem) -> list[str]:
+    """The item's own platform first, then the platforms of its variants."""
+    return [item.platform, *[v.platform for v in item.variants]]
+
+
+def caption_for(item: ContentItem, platform: str) -> str:
+    return next((v.caption for v in item.variants if v.platform == platform), item.caption)
+
+
+def schedule(session: Session, item: ContentItem, when: datetime, platform: str | None = None) -> Publication:
+    platform = platform or item.platform
     if item.status != ContentStatus.APPROVED.value:
         raise PublishingError("only approved content can be scheduled")
+    if platform not in platforms_of(item):
+        raise PublishingError(f"this content has no {platform} version; add the platform first")
     exists = session.scalar(select(Publication).where(
-        Publication.content_item_id == item.id, Publication.platform == item.platform,
+        Publication.content_item_id == item.id, Publication.platform == platform,
         Publication.status.in_(ACTIVE)))
     if exists:
         raise PublishingError("this content is already scheduled or published on this platform")
-    provider = get_social_provider(item.platform, session, item.project_id)
-    pub = Publication(content_item_id=item.id, project_id=item.project_id, platform=item.platform,
+    provider = get_social_provider(platform, session, item.project_id)
+    pub = Publication(content_item_id=item.id, project_id=item.project_id, platform=platform,
                       provider=provider.name, status="scheduled", scheduled_at=_aware(when))
     session.add(pub)
     return pub
@@ -51,10 +63,11 @@ def schedule_campaign(session: Session, campaign: Campaign, hhmm: str | None = N
         if item.status != ContentStatus.APPROVED.value or item.planned_date is None:
             skipped.append({"id": item.id, "reason": "not approved or no date"})
             continue
-        try:
-            created.append(schedule(session, item, local_to_utc(item.planned_date, hhmm, project.timezone)))
-        except PublishingError as exc:
-            skipped.append({"id": item.id, "reason": str(exc)})
+        for platform in platforms_of(item):
+            try:
+                created.append(schedule(session, item, local_to_utc(item.planned_date, hhmm, project.timezone), platform))
+            except PublishingError as exc:
+                skipped.append({"id": item.id, "reason": f"{platform}: {exc}"})
     return {"scheduled": len(created), "skipped": skipped}
 
 
@@ -117,7 +130,7 @@ def run_publication(session: Session, pub_id: uuid.UUID, storage: LocalStorage |
         provider = get_social_provider(pub.platform, session, pub.project_id)
         pub.provider = provider.name
         result = provider.publish(PublishPayload(
-            platform=pub.platform, headline=item.headline, caption=item.caption, cta=item.cta, image=image,
+            platform=pub.platform, headline=item.headline, caption=caption_for(item, pub.platform), cta=item.cta, image=image,
             item_id=item.id, project_id=pub.project_id))
     except Exception as exc:  # noqa: BLE001 - recorded, retried with backoff
         pub.last_error = str(exc)[:1000]

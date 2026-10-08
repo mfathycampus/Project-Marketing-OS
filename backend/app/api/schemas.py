@@ -64,6 +64,21 @@ class ProjectOut(ORM):
     created_at: datetime
 
 
+class VariantApi(ORM):
+    id: uuid.UUID
+    platform: str
+    caption: str
+
+
+class VariantsIn(BaseModel):
+    platforms: list[str] = Field(min_length=1)
+    use_ai: bool = True  # False: copy the original caption unchanged
+
+
+class VariantPatch(BaseModel):
+    caption: str
+
+
 class ContentItemApi(ORM):
     id: uuid.UUID
     campaign_id: uuid.UUID
@@ -75,6 +90,7 @@ class ContentItemApi(ORM):
     cta: str
     design: dict
     status: str
+    variants: list[VariantApi] = []
 
 
 class CampaignApi(ORM):

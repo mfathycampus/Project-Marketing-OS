@@ -168,11 +168,27 @@ class MetaProvider:
         post_id = res.get("post_id") or res.get("id")
         return PublishResult("published", post_id, f"https://www.facebook.com/{post_id}" if post_id else None)
 
+    @staticmethod
+    def _check_ratio(image: bytes) -> None:
+        """Instagram feed images must be between 4:5 and 1.91:1. Story-shaped (9:16) designs are rejected."""
+        try:
+            import io
+
+            from PIL import Image
+
+            w, h = Image.open(io.BytesIO(image)).size
+        except Exception:  # noqa: BLE001 - unreadable image: let Instagram decide
+            return
+        if not 0.8 <= w / h <= 1.91:
+            raise PermanentPublishError(
+                f"أبعاد الصورة ({w}x{h}) لا يقبلها إنستغرام كمنشور. استخدم قالبًا مربعًا بدل قالب الستوري")
+
     def _instagram(self, token: str, p: PublishPayload) -> PublishResult:
         if not p.image or p.item_id is None:
             raise PermanentPublishError("إنستغرام يحتاج صورة؛ ولّد التصميم أولًا")
         if not settings.public_base_url:
             raise PermanentPublishError("PUBLIC_BASE_URL غير مضبوط: إنستغرام يجلب الصورة من رابط عام")
+        self._check_ratio(p.image)
         url = f"{settings.public_base_url.rstrip('/')}/api/v1/content-items/{p.item_id}/design/image?format=jpeg"
         container = self.client.ig_create(self.conn.account_id, token, url, p.caption)
         deadline = time.monotonic() + self.ig_wait_s

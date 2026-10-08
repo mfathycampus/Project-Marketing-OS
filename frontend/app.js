@@ -134,16 +134,24 @@ function ScheduleEditor({ pub, onDone }) {
 }
 
 /* ---------- Campaign review ---------- */
-function ItemCard({ it, pub, reload, onEdit }) {
+function ItemCard({ it, pubs, reload, onEdit }) {
   const [busy, setBusy] = useState(false);
+  const [platOpen, setPlatOpen] = useState(false);
   const act = async (path, opts = { method: "POST" }) => { setBusy(true); try { await api(path, opts); reload(); } catch {} finally { setBusy(false); } };
   const hasImg = ["design_ready", "pending_approval", "approved", "rejected"].includes(it.status);
+  const platforms = [it.platform, ...(it.variants || []).map((v) => v.platform)];
+  const unscheduled = platforms.filter((pl) => !pubs.some((p) => p.platform === pl));
+  const scheduleAllPlatforms = async () => { setBusy(true); try { for (const platform of unscheduled) await api(`/content-items/${it.id}/schedule`, { method: "POST", body: { platform } }); reload(); } catch {} finally { setBusy(false); } };
   return html`<div class="card item">
     ${hasImg ? html`<img src=${`${API}/content-items/${it.id}/design/image?s=${it.status}`} alt="" loading="lazy" />`
       : html`<div class="ph">${it.status === "design_pending" ? html`<${Busy} text="جارٍ التصميم..." />` : "لا يوجد تصميم بعد"}</div>`}
     <h3>${it.headline}</h3>
     <p>${it.caption}</p>
-    <p class="muted" style="max-height:none">${PLATFORMS[it.platform] || it.platform} · ${it.planned_date ? arDate(it.planned_date) : ""}</p>
+    <p class="muted" style="max-height:none">${it.planned_date ? arDate(it.planned_date) : ""}</p>
+    <div class="actions" style="margin-bottom:8px">
+      ${platforms.map((pl, i) => html`<span class="badge">${PLATFORMS[pl] || pl}${i === 0 ? " ●" : ""}</span>`)}
+      ${!["archived"].includes(it.status) && html`<button disabled=${busy} onClick=${() => setPlatOpen(true)}>المنصات</button>`}
+    </div>
     <div class="actions">
       <${Badge} status=${it.status} />
       ${["ai_generated", "draft"].includes(it.status) && html`<button disabled=${busy} onClick=${() => act(`/content-items/${it.id}/design`)}>توليد التصميم</button>`}
@@ -152,12 +160,46 @@ function ItemCard({ it, pub, reload, onEdit }) {
       ${it.status === "pending_approval" && html`<button class="primary" disabled=${busy} onClick=${() => act(`/content-items/${it.id}/approve`)}>اعتماد</button>
         <button class="danger" disabled=${busy} onClick=${() => act(`/content-items/${it.id}/reject`, { method: "POST", body: { reason: "" } })}>رفض</button>`}
       ${it.status === "rejected" && html`<button disabled=${busy} onClick=${() => act(`/content-items/${it.id}/transition?to=draft`)}>إعادة لمسودة</button>`}
-      ${it.status === "approved" && !pub && html`<button class="primary" disabled=${busy} onClick=${() => act(`/content-items/${it.id}/schedule`, { method: "POST", body: {} })}>جدولة</button>`}
-      ${pub && html`<span class=${"badge p-" + pub.status}>${PSTATUS[pub.status]} · ${fmtTime(pub.scheduled_at)}</span>`}
-      ${pub && ["scheduled", "failed"].includes(pub.status) && html`<${ScheduleEditor} pub=${pub} onDone=${reload} />`}
+      ${it.status === "approved" && unscheduled.length > 0 && html`<button class="primary" disabled=${busy} onClick=${scheduleAllPlatforms}>جدولة${unscheduled.length > 1 ? ` (${unscheduled.length} منصات)` : ""}</button>`}
       ${!["approved", "archived"].includes(it.status) && html`<button disabled=${busy} onClick=${() => onEdit(it)}>تعديل</button>`}
     </div>
+    ${pubs.map((pub) => html`<div style="margin-top:8px"><span class=${"badge p-" + pub.status}>${PLATFORMS[pub.platform]}: ${PSTATUS[pub.status]} · ${fmtTime(pub.scheduled_at)}</span>
+      ${["scheduled", "failed"].includes(pub.status) && html`<${ScheduleEditor} pub=${pub} onDone=${reload} />`}</div>`)}
+    ${platOpen && html`<${PlatformsModal} it=${it} locked=${pubs} onClose=${() => setPlatOpen(false)} onChanged=${reload} />`}
   </div>`;
+}
+
+function PlatformsModal({ it, locked, onClose, onChanged }) {
+  const [pick, setPick] = useState([]);
+  const [ai, setAi] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const variants = it.variants || [];
+  const taken = [it.platform, ...variants.map((v) => v.platform)];
+  const available = Object.keys(PLATFORMS).filter((p) => !taken.includes(p));
+  const isLocked = (pl) => locked.some((p) => p.platform === pl);
+  const add = async () => { setBusy(true); try { await api(`/content-items/${it.id}/variants`, { method: "POST", body: { platforms: pick, use_ai: ai } }); setPick([]); onChanged(); } catch {} finally { setBusy(false); } };
+  const saveVar = async (v, caption) => { await api(`/variants/${v.id}`, { method: "PATCH", body: { caption } }); onChanged(); };
+  const delVar = async (v) => { await api(`/variants/${v.id}`, { method: "DELETE" }); onChanged(); };
+  return html`<div class="modal" onClick=${(e) => e.target === e.currentTarget && onClose()}><div class="box">
+    <h2>منصات هذا المنشور</h2>
+    <p class="muted">التصميم والموافقة واحدان لكل المنصات، والنص يُكيَّف لكل منصة.</p>
+    <p><strong>${PLATFORMS[it.platform]}</strong> <span class="muted">(الأصل)</span></p>
+    ${variants.map((v) => html`<${VariantRow} key=${v.id} v=${v} locked=${isLocked(v.platform)} onSave=${saveVar} onDelete=${delVar} />`)}
+    ${available.length > 0 && html`<hr style="border:0;border-top:1px solid var(--line);margin:14px 0" />
+      <label>إضافة منصات</label>
+      <div class="row">${available.map((pl) => html`<label style="display:inline-flex;gap:6px;color:var(--ink)"><input type="checkbox" style="width:auto" checked=${pick.includes(pl)} onChange=${() => setPick(pick.includes(pl) ? pick.filter((x) => x !== pl) : [...pick, pl])} />${PLATFORMS[pl]}</label>`)}</div>
+      <p><label style="display:inline-flex;gap:6px;color:var(--ink)"><input type="checkbox" style="width:auto" checked=${ai} onChange=${() => setAi(!ai)} />كيّف النص بالذكاء الاصطناعي (وإلا يُنسخ كما هو)</label></p>
+      <button class="primary" disabled=${busy || !pick.length} onClick=${add}>${busy ? "جارٍ التكييف..." : "إضافة"}</button>`}
+    <p style="margin-top:14px"><button onClick=${onClose}>إغلاق</button></p>
+  </div></div>`;
+}
+
+function VariantRow({ v, locked, onSave, onDelete }) {
+  const [text, setText] = useState(v.caption);
+  useEffect(() => setText(v.caption), [v.caption]);
+  return html`<div style="margin:10px 0"><strong>${PLATFORMS[v.platform]}</strong>
+    <textarea value=${text} disabled=${locked} onInput=${(e) => setText(e.target.value)}></textarea>
+    ${locked ? html`<span class="muted">مجدولة أو منشورة، ألغِ النشر أولًا لتعديلها.</span>` : html`<div class="actions"><button disabled=${text === v.caption} onClick=${() => onSave(v, text)}>حفظ النص</button><button class="danger" onClick=${() => onDelete(v)}>حذف</button></div>`}</div>`;
 }
 
 function EditModal({ it, onClose, onSaved }) {
@@ -192,8 +234,8 @@ function CampaignPage({ pid, cid }) {
   const counts = c.items.reduce((m, i) => ((m[i.status] = (m[i.status] || 0) + 1), m), {});
   const run = async (path) => { setBusy(true); try { await api(path, { method: "POST" }); reload(); } catch {} finally { setBusy(false); } };
   const needDesign = c.items.filter((i) => ["ai_generated", "draft"].includes(i.status)).length;
-  const pubOf = (id) => (pubs || []).filter((p) => p.content_item_id === id && p.status !== "cancelled")[0];
-  const toSchedule = c.items.filter((i) => i.status === "approved" && !pubOf(i.id)).length;
+  const pubsOf = (id) => (pubs || []).filter((p) => p.content_item_id === id && p.status !== "cancelled");
+  const toSchedule = c.items.filter((i) => i.status === "approved" && [i.platform, ...(i.variants || []).map((v) => v.platform)].some((pl) => !pubsOf(i.id).some((p) => p.platform === pl))).length;
   const scheduleAll = async () => { setBusy(true); try { const r = await api(`/projects/${pid}/campaigns/${cid}/schedule-all`, { method: "POST", body: { time } }); if (r.skipped.length) toastSetter(`تعذّرت جدولة ${r.skipped.length} منشور`); reload(); } catch {} finally { setBusy(false); } };
   const reviewable = c.items.filter((i) => ["design_ready", "pending_approval"].includes(i.status)).length;
   return html`<p><a href=${`#/p/${pid}/campaigns`}>← الحملات</a></p>
@@ -207,7 +249,7 @@ function CampaignPage({ pid, cid }) {
           <button class="primary" disabled=${busy || !toSchedule} onClick=${scheduleAll}>جدولة المعتمد (${toSchedule})</button></span>
         <button onClick=${() => (location.hash = `#/p/${pid}/calendar`)}>عرض في التقويم</button>
       </div></div>
-    <div class="grid">${c.items.map((it) => html`<${ItemCard} key=${it.id} it=${it} pub=${pubOf(it.id)} reload=${reload} onEdit=${setEdit} />`)}</div>
+    <div class="grid">${c.items.map((it) => html`<${ItemCard} key=${it.id} it=${it} pubs=${pubsOf(it.id)} reload=${reload} onEdit=${setEdit} />`)}</div>
     ${edit && html`<${EditModal} it=${edit} onClose=${() => setEdit(null)} onSaved=${() => { setEdit(null); reload(); }} />`}`;
 }
 
@@ -225,7 +267,7 @@ function Calendar({ pid }) {
   } else { first = weekStart(anchor); last = addDays(first, 6); }
   const [items, reload] = useFetch(`/projects/${pid}/calendar?start=${iso(first)}&end=${iso(last)}`);
   const [pubs] = useFetch(`/projects/${pid}/publications`);
-  const pubOf = (id) => (pubs || []).filter((p) => p.content_item_id === id && p.status !== "cancelled")[0];
+  const pubOf = (id) => { const l = (pubs || []).filter((p) => p.content_item_id === id && p.status !== "cancelled"); return l.find((p) => p.status === "published") || l[0]; };
   const [sel, setSel] = useState(null);
   const days = []; for (let d = first; d <= last; d = addDays(d, 1)) days.push(d);
   const byDay = {}; (items || []).forEach((i) => (byDay[i.planned_date] = [...(byDay[i.planned_date] || []), i]));
@@ -271,7 +313,7 @@ function Connections({ pid, query }) {
   const [pages, setPages] = useState(null);
   useEffect(() => {
     if (query.meta_error) toastSetter("تعذّر الربط: " + query.meta_error);
-    if (query.connected) { toastSetter("تم ربط الحساب"); reload(); }
+    if (query.connected) { toastSetter("تم ربط الحساب", true); reload(); }
     if (query.pick) api(`/meta/pending/${query.pick}`).then(setPages).catch(() => {});
   }, [query.meta_error, query.connected, query.pick]);
   const choose = async (page_id) => { await api("/meta/select", { method: "POST", body: { pending_id: query.pick, page_id } }); setPages(null); location.hash = `#/p/${pid}/publish`; reload(); };
@@ -281,8 +323,10 @@ function Connections({ pid, query }) {
     ${status && !status.configured && html`<p class="muted">لم يُضبط تطبيق Meta بعد. أضف META_APP_ID و META_APP_SECRET في ملف .env (الدليل: docs/meta-setup-ar.md) ثم أعد تشغيل الخادم.</p>`}
     <ul class="list">${["facebook", "instagram"].map((pl) => { const c = byPlat[pl]; return html`<li><span>${label[pl]}: ${c ? html`<strong>${c.account_name}</strong> ${c.status === "expired" ? html`<span class="badge s-rejected">انتهى الربط، أعد الربط</span>` : html`<span class="badge s-approved">متصل</span>`}` : html`<span class="muted">غير متصل (النشر يدوي)</span>`}</span>
       ${c && html`<button class="danger" onClick=${async () => { await api(`/projects/${pid}/social-connections/${c.id}`, { method: "DELETE" }); reload(); }}>فصل</button>`}</li>`; })}</ul>
+    ${byPlat.facebook && !byPlat.instagram && html`<p class="muted">إنستغرام غير متصل: تأكد أن لحساب إنستغرام (احترافي) ربطًا بصفحة فيسبوك، وأن صلاحيات إنستغرام مضافة في META_SCOPES، ثم أعد الربط.</p>`}
     ${status && status.configured && html`<p><a href=${`${API}/meta/connect?project_id=${pid}`}><button class="primary" type="button">${conns && conns.length ? "إعادة الربط بحساب Meta" : "ربط فيسبوك وإنستغرام"}</button></a></p>
-      ${!status.public_base_url_set && html`<p class="muted">لنشر إنستغرام تلقائيًا اضبط PUBLIC_BASE_URL (رابط عام للخادم). فيسبوك لا يحتاجه.</p>`}`}
+      ${!status.public_base_url_set ? html`<p class="muted">لنشر إنستغرام تلقائيًا اضبط PUBLIC_BASE_URL (رابط عام للخادم). فيسبوك لا يحتاجه.</p>`
+        : html`<p><button type="button" onClick=${async () => { const r = await api("/meta/check-public-url"); toastSetter(r.ok ? "الرابط العام يعمل" : "الرابط العام غير متاح: " + r.detail, r.ok); }}>فحص الرابط العام</button></p>`}`}
     ${pages && html`<div class="modal"><div class="box"><h2>اختر الصفحة</h2>
       ${pages.map((p) => html`<p><button style="width:100%;text-align:start" onClick=${() => choose(p.id)}>${p.name}${p.instagram ? ` — إنستغرام: @${p.instagram}` : " — لا يوجد إنستغرام مرتبط"}</button></p>`)}</div></div>`}
   </div>`;
@@ -293,7 +337,7 @@ function PubCard({ p, reload }) {
   const [busy, setBusy] = useState(false);
   const [url, setUrl] = useState("");
   const act = async (path, body) => { setBusy(true); try { await api(path, { method: "POST", body: body || {} }); reload(); } catch {} finally { setBusy(false); } };
-  const copy = async () => { try { await navigator.clipboard.writeText(p.caption); toastSetter("تم نسخ النص"); } catch { toastSetter("تعذّر النسخ، انسخ النص يدويًا"); } };
+  const copy = async () => { try { await navigator.clipboard.writeText(p.caption); toastSetter("تم نسخ النص", true); } catch { toastSetter("تعذّر النسخ، انسخ النص يدويًا"); } };
   return html`<div class="card item">
     <div class="actions" style="justify-content:space-between"><strong>${PLATFORMS[p.platform] || p.platform}</strong><span class=${"badge p-" + p.status}>${PSTATUS[p.status]}</span></div>
     <p class="muted" style="max-height:none">${fmtTime(p.scheduled_at)} · ${p.campaign_name}</p>
@@ -377,14 +421,14 @@ function BrandBrain({ pid }) {
 /* ---------- App ---------- */
 function App() {
   const parts = useHash();
-  const [toast, setToast] = useState("");
+  const [toast, setToast] = useState(null);
   const timer = useRef();
-  toastSetter = (m) => { setToast(m); clearTimeout(timer.current); timer.current = setTimeout(() => setToast(""), 6000); };
+  toastSetter = (m, ok = false) => { setToast({ m, ok }); clearTimeout(timer.current); timer.current = setTimeout(() => setToast(null), 6000); };
   let view;
   if (parts[0] === "p" && parts[1]) view = parts[2] === "c" && parts[3] ? html`<${CampaignPage} pid=${parts[1]} cid=${parts[3]} />` : html`<${Project} id=${parts[1]} tab=${parts[2]} key=${parts[1]} />`;
   else view = html`<${Projects} />`;
   return html`<header><a href="#/">Marketing OS</a><span class="sp"></span><a href="/docs" class="muted" style="font-weight:400">API</a></header>
-    <main>${view}</main>${toast && html`<div class="toast" onClick=${() => setToast("")}>${toast}</div>`}`;
+    <main>${view}</main>${toast && html`<div class=${"toast" + (toast.ok ? " ok" : "")} onClick=${() => setToast(null)}>${toast.m}</div>`}`;
 }
 
 render(html`<${App} />`, document.getElementById("app"));

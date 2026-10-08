@@ -67,3 +67,18 @@ class CampaignRequest(BaseModel):
     tone: str | None = None
     start_date: date | None = None  # defaults to today
     brief: str = ""  # free-text from the user, e.g. "weekend offer targeting families in Riyadh"
+
+
+class AdaptedCaption(BaseModel):
+    platform: Platform
+    caption: str
+
+    @model_validator(mode="after")
+    def _fits(self) -> "AdaptedCaption":
+        if len(self.caption) > CAPTION_LIMITS[self.platform]:
+            raise ValueError(f"caption for {self.platform} exceeds {CAPTION_LIMITS[self.platform]} chars")
+        return self
+
+
+class AdaptOut(BaseModel):
+    variants: list[AdaptedCaption] = Field(min_length=1)

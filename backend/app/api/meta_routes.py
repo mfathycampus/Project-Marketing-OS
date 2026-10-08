@@ -115,3 +115,19 @@ def disconnect(project_id: uuid.UUID, conn_id: uuid.UUID, session: Session = Dep
         raise HTTPException(404, "connection not found")
     session.delete(conn)
     session.commit()
+
+
+@router.get("/meta/check-public-url")
+def check_public_url():
+    """Can the internet reach this server? Instagram fetches images from PUBLIC_BASE_URL."""
+    import httpx
+
+    base = settings.public_base_url.rstrip("/")
+    if not base:
+        return {"ok": False, "detail": "PUBLIC_BASE_URL is not set"}
+    try:
+        r = httpx.get(f"{base}/health", timeout=15, follow_redirects=True)
+        return {"ok": r.status_code == 200 and r.json().get("status") == "ok", "status": r.status_code,
+                "detail": "reachable" if r.status_code == 200 else f"HTTP {r.status_code}"}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "detail": f"not reachable: {exc}"}

@@ -14,6 +14,7 @@ router = APIRouter()
 
 
 class ScheduleIn(BaseModel):
+    platform: str | None = None  # default: the item's own platform
     scheduled_at: datetime | None = None  # default: planned date at the default local time
 
 
@@ -40,7 +41,7 @@ def _out(session: Session, p: Publication) -> dict:
         "provider": p.provider, "status": p.status, "scheduled_at": service._aware(p.scheduled_at),
         "published_at": service._aware(p.published_at) if p.published_at else None,
         "external_url": p.external_url, "attempts": p.attempts, "last_error": p.last_error,
-        "headline": item.headline, "caption": item.caption, "cta": item.cta, "campaign_name": campaign.name,
+        "headline": item.headline, "caption": service.caption_for(item, p.platform), "cta": item.cta, "campaign_name": campaign.name,
     }
 
 
@@ -62,7 +63,7 @@ def schedule_item(item_id: uuid.UUID, body: ScheduleIn, session: Session = Depen
             raise HTTPException(422, "scheduled_at is required when the item has no planned date")
         project = session.get(Project, item.project_id)
         when = service.local_to_utc(item.planned_date, service.settings.publish_default_time, project.timezone)
-    pub = _guard(service.schedule, session, item, when)
+    pub = _guard(service.schedule, session, item, when, body.platform)
     session.commit()
     return _out(session, pub)
 
