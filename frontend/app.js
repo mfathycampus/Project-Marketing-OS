@@ -274,9 +274,13 @@ function Connections({ pid, query }) {
   </div>`;
 }
 
+const toLocalInput = (iso) => { const d = new Date(iso); const z = new Date(d.getTime() - d.getTimezoneOffset() * 6e4); return z.toISOString().slice(0, 16); };
+
 function PubCard({ p, reload }) {
   const [busy, setBusy] = useState(false);
   const [url, setUrl] = useState("");
+  const [when, setWhen] = useState(toLocalInput(p.scheduled_at));
+  useEffect(() => setWhen(toLocalInput(p.scheduled_at)), [p.scheduled_at]);
   const act = async (path, body) => { setBusy(true); try { await api(path, { method: "POST", body: body || {} }); reload(); } catch {} finally { setBusy(false); } };
   const copy = async () => { try { await navigator.clipboard.writeText(p.caption); toastSetter("تم نسخ النص"); } catch { toastSetter("تعذّر النسخ، انسخ النص يدويًا"); } };
   return html`<div class="card item">
@@ -291,7 +295,11 @@ function PubCard({ p, reload }) {
         <input style="flex:1;min-width:140px" placeholder="رابط المنشور (اختياري)" value=${url} onInput=${(e) => setUrl(e.target.value)} />
         <button class="primary" disabled=${busy} onClick=${() => act(`/publications/${p.id}/mark-published`, { url: url || null })}>تم النشر</button>`}
       ${p.status === "published" && p.external_url && html`<a href=${p.external_url} target="_blank" rel="noopener">فتح المنشور</a>`}
-      ${p.status === "failed" && html`<button class="primary" disabled=${busy} onClick=${() => act(`/publications/${p.id}/retry`)}>إعادة المحاولة</button>`}
+      ${["scheduled", "failed"].includes(p.status) && html`<div class="row" style="width:100%;align-items:center;gap:6px">
+        <input type="datetime-local" style="flex:1;min-width:160px" value=${when} onInput=${(e) => setWhen(e.target.value)} />
+        <button disabled=${busy || !when} onClick=${() => act(`/publications/${p.id}/reschedule`, { scheduled_at: new Date(when).toISOString() })}>حفظ الموعد</button>
+        <button class="primary" disabled=${busy} onClick=${() => act(`/publications/${p.id}/reschedule`, { scheduled_at: new Date().toISOString() })}>انشر الآن</button></div>`}
+      ${p.status === "failed" && html`<button disabled=${busy} onClick=${() => act(`/publications/${p.id}/retry`)}>إعادة المحاولة</button>`}
       ${["scheduled", "awaiting_manual", "failed"].includes(p.status) && html`<button class="danger" disabled=${busy} onClick=${() => act(`/publications/${p.id}/cancel`)}>إلغاء</button>`}
     </div></div>`;
 }
