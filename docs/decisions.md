@@ -28,3 +28,13 @@ Content status ends at APPROVED; scheduled/published/failed belong to per-platfo
   is implemented against **mocked** HTTP only. canva.dev was unreachable from the build sandbox, so endpoint paths
   and payloads are from memory and MUST be verified against a live Canva app (`/canva/status`) before use.
 - Known gap: Canva refresh uses no row lock yet; polling is synchronous inside the request (worker in Sprint 3).
+
+## Sprint 3 (workflow + UI)
+- Canva Autofill verified available (`/canva/status` -> autofill true) but publishing a brand template is blocked
+  by the school team's permissions, and AI design generation is disabled by its admin. HTML renderer stays default.
+- Approval workflow: submit / approve / reject / approve-all, every transition validated and logged in
+  `content_status_history`. Approved/archived content is locked from edits.
+- Calendar: `campaigns.start_date` + `content_items.planned_date`; `/projects/{id}/calendar?start&end`.
+- Design worker: DB-backed queue (`design_jobs` is source of truth), in-process thread, atomic claim,
+  crash recovery (processing -> pending on start). Move to Celery/Redis only when running multiple processes.
+- UI: no-build static app (Preact + htm vendored, RTL Arabic) served by FastAPI at `/ui/`.

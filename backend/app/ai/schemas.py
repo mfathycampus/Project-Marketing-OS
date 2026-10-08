@@ -1,4 +1,5 @@
 """Structured output contract between Claude and the rest of the system."""
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -52,4 +53,5 @@ class CampaignRequest(BaseModel):
     post_count: int = Field(default=5, ge=1, le=30)
     platforms: list[Platform] = Field(min_length=1)
     tone: str | None = None
+    start_date: date | None = None  # defaults to today
     brief: str = ""  # free-text from the user, e.g. "weekend offer targeting families in Riyadh"

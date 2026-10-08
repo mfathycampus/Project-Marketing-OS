@@ -107,3 +107,26 @@ def canva_template_dataset(template_id: str, template_key: str | None = None,
     fields = {f.name: names[f.name] for f in spec.fields if f.name in names} if spec else {}
     entry = {template_key: {"brand_template_id": template_id, "fields": fields}} if spec else None
     return {"fields": {k: v.get("type") for k, v in dataset.items()}, "template_map_entry": entry}
+
+
+@router.post("/projects/{project_id}/campaigns/{campaign_id}/designs", status_code=202)
+def queue_campaign_designs(project_id: uuid.UUID, campaign_id: uuid.UUID,
+                           session: Session = Depends(get_session),
+                           provider: DesignProvider = Depends(get_designer)):
+    """Queue design jobs for every item that has no design yet. The worker renders them."""
+    from app.models import Campaign
+
+    c = session.get(Campaign, campaign_id)
+    if c is None or c.project_id != project_id:
+        raise HTTPException(404, "campaign not found")
+    svc = DesignService(session, provider)
+    queued, errors = 0, []
+    for item in c.items:
+        if item.status not in ("ai_generated", "draft"):
+            continue
+        try:
+            svc.enqueue(item.id)
+            queued += 1
+        except DesignSpecError as exc:
+            errors.append({"id": str(item.id), "error": str(exc)})
+    return {"queued": queued, "errors": errors}

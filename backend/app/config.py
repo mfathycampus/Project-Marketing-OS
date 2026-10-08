@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     canva_api_base: str = "https://api.canva.com/rest/v1"
     canva_template_map: dict = {}  # {"offer_square": {"brand_template_id": "...", "fields": {"headline": "HEADLINE"}}}
     canva_poll_timeout_s: int = 60
+    worker_enabled: bool = True
+    worker_poll_interval_s: float = 1.0
 
     @field_validator("encryption_key", "canva_client_id", "canva_client_secret", "anthropic_api_key", mode="before")
     @classmethod

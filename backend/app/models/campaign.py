@@ -1,10 +1,11 @@
 import uuid
+from datetime import date, datetime
 
-from sqlalchemy import JSON, ForeignKey, String, Text
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.content.state_machine import ContentStatus
-from app.db import Base, IdMixin, TimestampMixin
+from app.db import Base, IdMixin, TimestampMixin, utcnow
 
 
 class Campaign(Base, IdMixin, TimestampMixin):
@@ -16,6 +17,7 @@ class Campaign(Base, IdMixin, TimestampMixin):
     brief: Mapped[str] = mapped_column(Text, default="")
     strategy: Mapped[str] = mapped_column(Text, default="")
     duration_days: Mapped[int] = mapped_column(default=7)
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     ai_run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("ai_runs.id"), nullable=True)
 
     items: Mapped[list["ContentItem"]] = relationship(
@@ -33,6 +35,7 @@ class ContentItem(Base, IdMixin, TimestampMixin):
     type: Mapped[str] = mapped_column(String(30), default="social_post")
     platform: Mapped[str] = mapped_column(String(30))
     day_offset: Mapped[int] = mapped_column(default=0)
+    planned_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     headline: Mapped[str] = mapped_column(String(300), default="")
     caption: Mapped[str] = mapped_column(Text, default="")
     cta: Mapped[str] = mapped_column(String(200), default="")
@@ -40,3 +43,13 @@ class ContentItem(Base, IdMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(30), default=ContentStatus.AI_GENERATED.value)
 
     campaign: Mapped[Campaign] = relationship(back_populates="items")
+
+
+class ContentStatusHistory(Base, IdMixin):
+    __tablename__ = "content_status_history"
+
+    content_item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("content_items.id"), index=True)
+    from_status: Mapped[str] = mapped_column(String(30))
+    to_status: Mapped[str] = mapped_column(String(30))
+    note: Mapped[str] = mapped_column(String(300), default="")
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

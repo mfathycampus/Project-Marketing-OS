@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -66,8 +66,10 @@ class ProjectOut(ORM):
 
 class ContentItemApi(ORM):
     id: uuid.UUID
+    campaign_id: uuid.UUID
     platform: str
     day_offset: int
+    planned_date: date | None = None
     headline: str
     caption: str
     cta: str
@@ -81,4 +83,28 @@ class CampaignApi(ORM):
     objective: str
     strategy: str
     duration_days: int
+    start_date: date | None = None
     items: list[ContentItemApi]
+
+
+class CampaignSummary(ORM):
+    id: uuid.UUID
+    name: str
+    objective: str
+    start_date: date | None = None
+    created_at: datetime
+
+
+class ContentPatch(BaseModel):
+    headline: str | None = Field(default=None, max_length=60)
+    caption: str | None = None
+    cta: str | None = Field(default=None, max_length=100)
+    planned_date: date | None = None
+
+
+class RejectIn(BaseModel):
+    reason: str = ""
+
+
+class CalendarItem(ContentItemApi):
+    campaign_name: str = ""

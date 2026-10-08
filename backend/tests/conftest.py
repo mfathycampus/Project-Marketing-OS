@@ -4,6 +4,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import os
+
+os.environ.setdefault("WORKER_ENABLED", "false")
+
 import app.models  # noqa: F401
 from app.ai.provider import FakeProvider
 from app.api.routes import get_llm

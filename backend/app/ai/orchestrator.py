@@ -1,5 +1,6 @@
 """AIOrchestrator: the single entry point for all LLM-powered operations."""
 import uuid
+from datetime import date, timedelta
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -62,7 +63,7 @@ class AIOrchestrator:
             cache_read_tokens=0,
             cache_write_tokens=0,
             latency_ms=0,
-            request=req.model_dump(),
+            request=req.model_dump(mode="json"),
         )
         self.session.add(run)
 
@@ -96,6 +97,7 @@ class AIOrchestrator:
 
         run.status = "ok"
         run.model = result.model if result else run.model
+        start = req.start_date or date.today()
         campaign = Campaign(
             project_id=project_id,
             name=parsed.name,
@@ -103,6 +105,7 @@ class AIOrchestrator:
             brief=req.brief,
             strategy=parsed.strategy,
             duration_days=req.duration_days,
+            start_date=start,
         )
         self.session.flush()
         campaign.ai_run_id = run.id
@@ -113,6 +116,7 @@ class AIOrchestrator:
                     type=item.type,
                     platform=item.platform,
                     day_offset=item.day_offset,
+                    planned_date=start + timedelta(days=item.day_offset),
                     headline=item.headline,
                     caption=item.caption,
                     cta=item.cta,
