@@ -57,11 +57,17 @@ def meta_callback(state: str, code: str | None = None, error: str | None = None,
         return _ui(project_id, "meta_error=" + quote(error_description or error or "cancelled"))
     client = meta.MetaClient()
     try:
-        pages = client.pages(client.exchange_code(code))
+        token = client.exchange_code(code)
+        pages = client.pages(token)
     except (meta.MetaError, Exception) as exc:  # noqa: BLE001 - shown to the user, never contains tokens
         return _ui(project_id, "meta_error=" + quote(str(exc)[:300]))
     if not pages:
-        return _ui(project_id, "meta_error=" + quote("لم نجد أي صفحة فيسبوك تديرها هذا الحساب"))
+        who = client.whoami(token)
+        hint = (f"لم تُرجع Meta أي صفحة. الحساب: {who['name'] or 'غير معروف'}. "
+                f"الصلاحيات الممنوحة: {', '.join(who['granted']) or 'لا شيء'}")
+        if "pages_show_list" not in who["granted"]:
+            hint += " | ناقصة pages_show_list"
+        return _ui(project_id, "meta_error=" + quote(hint))
     if len(pages) == 1:
         meta.save_selection(session, project_id, pages[0])
         session.commit()

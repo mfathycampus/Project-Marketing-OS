@@ -101,6 +101,18 @@ class MetaClient:
             "fields": "id,name,access_token,instagram_business_account{id,username}", "access_token": user_token})
         return d.get("data", [])
 
+    def whoami(self, user_token: str) -> dict:
+        """Account name + granted permissions: explains an empty page list. Never returns tokens."""
+        out = {"name": "", "granted": [], "declined": []}
+        try:
+            out["name"] = self._call("GET", _graph("/me"), params={"fields": "name", "access_token": user_token}).get("name", "")
+            perms = self._call("GET", _graph("/me/permissions"), params={"access_token": user_token}).get("data", [])
+            out["granted"] = [x["permission"] for x in perms if x.get("status") == "granted"]
+            out["declined"] = [x["permission"] for x in perms if x.get("status") != "granted"]
+        except MetaError:
+            pass
+        return out
+
     def post_photo(self, page_id: str, token: str, image: bytes, caption: str) -> dict:
         return self._call("POST", _graph(f"/{page_id}/photos"), data={"caption": caption, "access_token": token},
                           files={"source": ("post.png", image, "image/png")})

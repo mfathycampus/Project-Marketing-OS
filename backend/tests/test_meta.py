@@ -184,3 +184,24 @@ def test_scopes_are_configurable(monkeypatch):
     monkeypatch.setattr(settings, "meta_scopes", "pages_show_list, pages_manage_posts")
     url = meta.login_url(uuid.uuid4())
     assert "scope=pages_show_list%2Cpages_manage_posts" in url and "instagram" not in url
+
+
+def test_empty_pages_error_names_account_and_granted_permissions(client, monkeypatch):
+    pid = client.post("/api/v1/projects", json={"name": "P"}).json()["id"]
+    monkeypatch.setattr(meta.MetaClient, "exchange_code", lambda self, code: "LONG")
+    monkeypatch.setattr(meta.MetaClient, "pages", lambda self, tok: [])
+    monkeypatch.setattr(meta.MetaClient, "whoami", lambda self, tok: {"name": "Mohammed", "granted": ["public_profile"], "declined": []})
+    r = client.get("/api/v1/meta/callback", params={"state": meta.make_state(uuid.UUID(pid)), "code": "c"}, follow_redirects=False)
+    from urllib.parse import unquote
+    msg = unquote(r.headers["location"])
+    assert "Mohammed" in msg and "public_profile" in msg and "pages_show_list" in msg
+
+
+def test_whoami_lists_granted_permissions(session):
+    def handler(req):
+        if req.url.path.endswith("/me/permissions"):
+            return httpx.Response(200, json={"data": [{"permission": "pages_show_list", "status": "granted"}, {"permission": "pages_manage_posts", "status": "declined"}]})
+        return httpx.Response(200, json={"name": "Me"})
+
+    w = fake_client(handler).whoami("T")
+    assert w == {"name": "Me", "granted": ["pages_show_list"], "declined": ["pages_manage_posts"]}
