@@ -49,3 +49,12 @@ Content status ends at APPROVED; scheduled/published/failed belong to per-platfo
 - Why no Meta adapter yet: Instagram/Facebook publishing needs an approved Meta app (Business Verification, review
   of `instagram_content_publish` / `pages_manage_posts`) and **publicly reachable image URLs**, which means object
   storage (S3-compatible) instead of local disk. Both are prerequisites, not code.
+
+## Meta provider (Development mode)
+- Own-account publishing without App Review: OAuth login -> long-lived user token -> page token (non-expiring) stored
+  encrypted in `social_connections`; Facebook posts upload the image bytes, Instagram posts use a public JPEG URL
+  (`PUBLIC_BASE_URL` + `/design/image?format=jpeg`).
+- A connected account for (project, platform) wins over the default provider, so unconnected platforms stay manual.
+- Auth failures (code 190 etc.) mark the connection `expired` and fail the publication permanently (no pointless retries).
+- UNVERIFIED against live Meta: the sandbox could not reach developers.facebook.com. Tested with mocked HTTP only.
+  Graph version is configurable (`META_GRAPH_VERSION`, default v23.0).

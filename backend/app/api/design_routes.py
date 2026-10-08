@@ -44,13 +44,22 @@ def generate_design(item_id: uuid.UUID, session: Session = Depends(get_session),
 
 
 @router.get("/content-items/{item_id}/design/image")
-def design_image(item_id: uuid.UUID, session: Session = Depends(get_session)):
+def design_image(item_id: uuid.UUID, format: str | None = None, session: Session = Depends(get_session)):
     if session.get(ContentItem, item_id) is None:
         raise HTTPException(404, "content item not found")
     asset = DesignService(session, None).latest_asset(item_id)  # type: ignore[arg-type]
     if asset is None:
         raise HTTPException(404, "no design yet")
-    return Response(LocalStorage().get(asset.storage_key), media_type=asset.mime_type)
+    data = LocalStorage().get(asset.storage_key)
+    if format == "jpeg":  # Instagram only accepts JPEG
+        import io
+
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.open(io.BytesIO(data)).convert("RGB").save(buf, "JPEG", quality=92)
+        return Response(buf.getvalue(), media_type="image/jpeg")
+    return Response(data, media_type=asset.mime_type)
 
 
 @router.get("/canva/connect")

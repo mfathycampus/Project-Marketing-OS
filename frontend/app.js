@@ -70,7 +70,9 @@ function Projects() {
 }
 
 /* ---------- Project shell ---------- */
-function Project({ id, tab }) {
+function Project({ id, tab: rawTab }) {
+  const [tab, qs] = (rawTab || "").split("?");
+  const query = Object.fromEntries(new URLSearchParams(qs || ""));
   const [project] = useFetch(`/projects/${id}`);
   const tabs = [["campaigns", "الحملات"], ["calendar", "التقويم"], ["publish", "النشر"], ["brand", "هوية العلامة"]];
   const cur = tab || "campaigns";
@@ -78,7 +80,7 @@ function Project({ id, tab }) {
     <div class="tabs">${tabs.map(([k, l]) => html`<button class=${cur === k ? "on" : ""} onClick=${() => (location.hash = `#/p/${id}/${k}`)}>${l}</button>`)}</div>
     ${cur === "campaigns" && html`<${Campaigns} pid=${id} />`}
     ${cur === "calendar" && html`<${Calendar} pid=${id} />`}
-    ${cur === "publish" && html`<${Publishing} pid=${id} />`}
+    ${cur === "publish" && html`<${Publishing} pid=${id} query=${query} />`}
     ${cur === "brand" && html`<${BrandBrain} pid=${id} />`}`;
 }
 
@@ -249,6 +251,29 @@ function CalendarDetail({ it, onClose, onChanged }) {
 
 
 /* ---------- Publishing ---------- */
+function Connections({ pid, query }) {
+  const [conns, reload] = useFetch(`/projects/${pid}/social-connections`);
+  const [status] = useFetch("/meta/status");
+  const [pages, setPages] = useState(null);
+  useEffect(() => {
+    if (query.meta_error) toastSetter("تعذّر الربط: " + query.meta_error);
+    if (query.connected) { toastSetter("تم ربط الحساب"); reload(); }
+    if (query.pick) api(`/meta/pending/${query.pick}`).then(setPages).catch(() => {});
+  }, [query.meta_error, query.connected, query.pick]);
+  const choose = async (page_id) => { await api("/meta/select", { method: "POST", body: { pending_id: query.pick, page_id } }); setPages(null); location.hash = `#/p/${pid}/publish`; reload(); };
+  const label = { facebook: "فيسبوك (صفحة)", instagram: "إنستغرام" };
+  const byPlat = Object.fromEntries((conns || []).map((c) => [c.platform, c]));
+  return html`<div class="card"><h2>ربط الحسابات</h2>
+    ${status && !status.configured && html`<p class="muted">لم يُضبط تطبيق Meta بعد. أضف META_APP_ID و META_APP_SECRET في ملف .env (الدليل: docs/meta-setup-ar.md) ثم أعد تشغيل الخادم.</p>`}
+    <ul class="list">${["facebook", "instagram"].map((pl) => { const c = byPlat[pl]; return html`<li><span>${label[pl]}: ${c ? html`<strong>${c.account_name}</strong> ${c.status === "expired" ? html`<span class="badge s-rejected">انتهى الربط، أعد الربط</span>` : html`<span class="badge s-approved">متصل</span>`}` : html`<span class="muted">غير متصل (النشر يدوي)</span>`}</span>
+      ${c && html`<button class="danger" onClick=${async () => { await api(`/projects/${pid}/social-connections/${c.id}`, { method: "DELETE" }); reload(); }}>فصل</button>`}</li>`; })}</ul>
+    ${status && status.configured && html`<p><a href=${`${API}/meta/connect?project_id=${pid}`}><button class="primary" type="button">${conns && conns.length ? "إعادة الربط بحساب Meta" : "ربط فيسبوك وإنستغرام"}</button></a></p>
+      ${!status.public_base_url_set && html`<p class="muted">لنشر إنستغرام تلقائيًا اضبط PUBLIC_BASE_URL (رابط عام للخادم). فيسبوك لا يحتاجه.</p>`}`}
+    ${pages && html`<div class="modal"><div class="box"><h2>اختر الصفحة</h2>
+      ${pages.map((p) => html`<p><button style="width:100%;text-align:start" onClick=${() => choose(p.id)}>${p.name}${p.instagram ? ` — إنستغرام: @${p.instagram}` : " — لا يوجد إنستغرام مرتبط"}</button></p>`)}</div></div>`}
+  </div>`;
+}
+
 function PubCard({ p, reload }) {
   const [busy, setBusy] = useState(false);
   const [url, setUrl] = useState("");
@@ -271,12 +296,13 @@ function PubCard({ p, reload }) {
     </div></div>`;
 }
 
-function Publishing({ pid }) {
+function Publishing({ pid, query }) {
   const [list, reload] = useFetch(`/projects/${pid}/publications`);
   useEffect(() => { const t = setInterval(reload, 10000); return () => clearInterval(t); }, []);
   if (!list) return html`<${Busy} text="تحميل..." />`;
   const groups = [["awaiting_manual", "بانتظار النشر اليدوي"], ["failed", "فشل"], ["scheduled", "مجدول"], ["published", "تم النشر"]];
-  return html`<p class="muted">النشر الآلي على المنصات يتطلب ربط حساباتها. حاليًا يُجهَّز المنشور في موعده لتنشره يدويًا بنسخ النص وتنزيل الصورة.</p>
+  return html`<${Connections} pid=${pid} query=${query || {}} />
+    <p class="muted">المنصات المتصلة تُنشر تلقائيًا في الموعد. غيرها يُجهَّز لتنشره يدويًا بنسخ النص وتنزيل الصورة.</p>
     ${list.filter((p) => p.status !== "cancelled").length === 0 && html`<p class="muted">لا توجد منشورات مجدولة. اعتمد المنشورات في صفحة الحملة ثم اضغط "جدولة المعتمد".</p>`}
     ${groups.map(([st, label]) => { const rows = list.filter((p) => p.status === st); return rows.length ? html`<h2>${label} (${rows.length})</h2><div class="grid">${rows.map((p) => html`<${PubCard} key=${p.id} p=${p} reload=${reload} />`)}</div>` : null; })}`;
 }

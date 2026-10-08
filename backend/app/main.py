@@ -6,6 +6,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.design_routes import router as design_router
+from app.api.meta_routes import router as meta_router
 from app.api.publishing_routes import router as publishing_router
 from app.api.routes import router
 from app.config import settings
@@ -29,6 +30,7 @@ app = FastAPI(title="Project Marketing OS", lifespan=lifespan)
 app.include_router(router, prefix="/api/v1")
 app.include_router(design_router, prefix="/api/v1")
 app.include_router(publishing_router, prefix="/api/v1")
+app.include_router(meta_router, prefix="/api/v1")
 
 
 @app.get("/health")

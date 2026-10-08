@@ -9,7 +9,7 @@ from app.config import settings
 from app.content.state_machine import ContentStatus
 from app.db import utcnow
 from app.models import Campaign, ContentItem, DesignAsset, Project, Publication
-from app.social.provider import PublishPayload, get_social_provider
+from app.social.provider import PermanentPublishError, PublishPayload, get_social_provider
 from app.storage.local import LocalStorage
 
 ACTIVE = ("scheduled", "publishing", "awaiting_manual", "published")
@@ -36,7 +36,7 @@ def schedule(session: Session, item: ContentItem, when: datetime) -> Publication
         Publication.status.in_(ACTIVE)))
     if exists:
         raise PublishingError("this content is already scheduled or published on this platform")
-    provider = get_social_provider(item.platform)
+    provider = get_social_provider(item.platform, session, item.project_id)
     pub = Publication(content_item_id=item.id, project_id=item.project_id, platform=item.platform,
                       provider=provider.name, status="scheduled", scheduled_at=_aware(when))
     session.add(pub)
@@ -114,11 +114,16 @@ def run_publication(session: Session, pub_id: uuid.UUID, storage: LocalStorage |
             image = None
     pub.attempts += 1
     try:
-        result = get_social_provider(pub.platform).publish(PublishPayload(
-            platform=pub.platform, headline=item.headline, caption=item.caption, cta=item.cta, image=image))
+        provider = get_social_provider(pub.platform, session, pub.project_id)
+        pub.provider = provider.name
+        result = provider.publish(PublishPayload(
+            platform=pub.platform, headline=item.headline, caption=item.caption, cta=item.cta, image=image,
+            item_id=item.id, project_id=pub.project_id))
     except Exception as exc:  # noqa: BLE001 - recorded, retried with backoff
         pub.last_error = str(exc)[:1000]
-        if pub.attempts < settings.publish_max_attempts:
+        if isinstance(exc, PermanentPublishError):
+            pub.status = "failed"  # retrying cannot help
+        elif pub.attempts < settings.publish_max_attempts:
             pub.status, pub.scheduled_at = "scheduled", utcnow() + timedelta(minutes=5 * pub.attempts)
         else:
             pub.status = "failed"

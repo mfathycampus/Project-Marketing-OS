@@ -6,6 +6,10 @@ from typing import Protocol
 from app.config import settings
 
 
+class PermanentPublishError(RuntimeError):
+    """Retrying will not help (expired token, missing config, rejected content)."""
+
+
 @dataclass
 class PublishPayload:
     platform: str
@@ -13,6 +17,8 @@ class PublishPayload:
     caption: str
     cta: str
     image: bytes | None = None
+    item_id: uuid.UUID | None = None
+    project_id: uuid.UUID | None = None
 
 
 @dataclass
@@ -49,6 +55,12 @@ class DryRunProvider:
 _PROVIDERS = {"manual": ManualProvider, "dryrun": DryRunProvider}
 
 
-def get_social_provider(platform: str) -> SocialProvider:
-    # Real adapters (Meta, TikTok, LinkedIn, X) register here keyed by platform once their apps are approved.
+def get_social_provider(platform: str, session=None, project_id=None) -> SocialProvider:
+    """A connected account for this project+platform wins; otherwise the configured default (manual)."""
+    if session is not None and project_id is not None and platform in ("facebook", "instagram"):
+        from app.social.meta import provider_for
+
+        connected = provider_for(session, project_id, platform)
+        if connected is not None:
+            return connected
     return _PROVIDERS.get(settings.publish_provider, ManualProvider)()

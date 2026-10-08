@@ -85,7 +85,7 @@ def test_failure_retries_with_backoff_then_fails(client, approved, engine, monke
         def publish(self, payload):
             raise RuntimeError("api down")
 
-    monkeypatch.setattr(service, "get_social_provider", lambda platform: Boom())
+    monkeypatch.setattr(service, "get_social_provider", lambda *a, **k: Boom())
     monkeypatch.setattr(settings, "publish_max_attempts", 2)
     client.post(f"/api/v1/content-items/{body['items'][0]['id']}/schedule", json={"scheduled_at": (datetime.now(UTC) - timedelta(minutes=1)).isoformat()})
     maker = sessionmaker(engine, expire_on_commit=False)

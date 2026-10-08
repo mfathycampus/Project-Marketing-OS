@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     canva_template_map: dict = {}  # {"offer_square": {"brand_template_id": "...", "fields": {"headline": "HEADLINE"}}}
     canva_poll_timeout_s: int = 60
     worker_enabled: bool = True
+    meta_app_id: str = ""
+    meta_app_secret: str = ""
+    meta_redirect_uri: str = "http://localhost:8000/api/v1/meta/callback"
+    meta_graph_version: str = "v23.0"
+    meta_config_id: str = ""  # only for 'Facebook Login for Business' apps (replaces scopes)
+    public_base_url: str = ""  # public URL of this server; Instagram fetches images from it
     publish_provider: str = "manual"  # manual | dryrun (real platform providers plug in here)
     publish_poll_interval_s: float = 5.0
     publish_default_time: str = "19:00"  # local project time
@@ -49,7 +55,7 @@ class Settings(BaseSettings):
                 return prefix + (_BACKEND / path).as_posix()
         return v
 
-    @field_validator("encryption_key", "canva_client_id", "canva_client_secret", "anthropic_api_key", mode="before")
+    @field_validator("encryption_key", "canva_client_id", "canva_client_secret", "anthropic_api_key", "meta_app_id", "meta_app_secret", mode="before")
     @classmethod
     def _clean_secret(cls, v):
         """Tolerate quotes, stray whitespace and inline '# comments' pasted into .env."""
