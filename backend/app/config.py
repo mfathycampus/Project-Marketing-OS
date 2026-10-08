@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     canva_template_map: dict = {}  # {"offer_square": {"brand_template_id": "...", "fields": {"headline": "HEADLINE"}}}
     canva_poll_timeout_s: int = 60
     worker_enabled: bool = True
+    publish_provider: str = "manual"  # manual | dryrun (real platform providers plug in here)
+    publish_poll_interval_s: float = 5.0
+    publish_default_time: str = "19:00"  # local project time
+    publish_max_attempts: int = 3
     auto_migrate: bool = True  # sqlite only: create/upgrade tables on startup
     worker_poll_interval_s: float = 1.0
 

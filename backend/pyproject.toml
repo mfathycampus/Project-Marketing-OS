@@ -11,6 +11,7 @@ dependencies = [
   "pydantic-settings>=2.2",
   "anthropic>=0.40",
   "psycopg[binary]>=3.1",
+  "tzdata>=2024.1",  # IANA timezones on Windows
 ]
 
 [project.optional-dependencies]

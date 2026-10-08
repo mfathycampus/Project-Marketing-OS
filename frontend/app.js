@@ -9,6 +9,7 @@ const STATUS = {
   draft: "مسودة", ai_generated: "بدون تصميم", design_pending: "جارٍ التصميم", design_ready: "التصميم جاهز",
   pending_approval: "بانتظار الموافقة", approved: "معتمد", rejected: "مرفوض", archived: "مؤرشف",
 };
+const PSTATUS = { scheduled: "مجدول", publishing: "جارٍ النشر", awaiting_manual: "بانتظار النشر اليدوي", published: "تم النشر", failed: "فشل", cancelled: "ملغى" };
 const PLATFORMS = { instagram: "إنستغرام", facebook: "فيسبوك", tiktok: "تيك توك", linkedin: "لينكدإن", x: "إكس" };
 const OBJECTIVES = { increase_orders: "زيادة الطلبات", brand_awareness: "الوعي بالعلامة", new_product: "إطلاق منتج جديد", engagement: "رفع التفاعل" };
 
@@ -42,6 +43,7 @@ function useHash() {
 }
 
 const LOC = "ar-SA-u-ca-gregory-nu-latn";
+const fmtTime = (s) => new Date(s).toLocaleString(LOC, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 const iso = (d) => d.toISOString().slice(0, 10);
 const addDays = (d, n) => new Date(d.getTime() + n * 864e5);
 const arDate = (s) => new Date(s + "T00:00:00Z").toLocaleDateString(LOC, { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
@@ -70,12 +72,13 @@ function Projects() {
 /* ---------- Project shell ---------- */
 function Project({ id, tab }) {
   const [project] = useFetch(`/projects/${id}`);
-  const tabs = [["campaigns", "الحملات"], ["calendar", "التقويم"], ["brand", "هوية العلامة"]];
+  const tabs = [["campaigns", "الحملات"], ["calendar", "التقويم"], ["publish", "النشر"], ["brand", "هوية العلامة"]];
   const cur = tab || "campaigns";
   return html`<h1>${project ? project.name : "..."}</h1>
     <div class="tabs">${tabs.map(([k, l]) => html`<button class=${cur === k ? "on" : ""} onClick=${() => (location.hash = `#/p/${id}/${k}`)}>${l}</button>`)}</div>
     ${cur === "campaigns" && html`<${Campaigns} pid=${id} />`}
     ${cur === "calendar" && html`<${Calendar} pid=${id} />`}
+    ${cur === "publish" && html`<${Publishing} pid=${id} />`}
     ${cur === "brand" && html`<${BrandBrain} pid=${id} />`}`;
 }
 
@@ -116,7 +119,7 @@ function Campaigns({ pid }) {
 }
 
 /* ---------- Campaign review ---------- */
-function ItemCard({ it, reload, onEdit }) {
+function ItemCard({ it, pub, reload, onEdit }) {
   const [busy, setBusy] = useState(false);
   const act = async (path, opts = { method: "POST" }) => { setBusy(true); try { await api(path, opts); reload(); } catch {} finally { setBusy(false); } };
   const hasImg = ["design_ready", "pending_approval", "approved", "rejected"].includes(it.status);
@@ -134,6 +137,8 @@ function ItemCard({ it, reload, onEdit }) {
       ${it.status === "pending_approval" && html`<button class="primary" disabled=${busy} onClick=${() => act(`/content-items/${it.id}/approve`)}>اعتماد</button>
         <button class="danger" disabled=${busy} onClick=${() => act(`/content-items/${it.id}/reject`, { method: "POST", body: { reason: "" } })}>رفض</button>`}
       ${it.status === "rejected" && html`<button disabled=${busy} onClick=${() => act(`/content-items/${it.id}/transition?to=draft`)}>إعادة لمسودة</button>`}
+      ${it.status === "approved" && !pub && html`<button class="primary" disabled=${busy} onClick=${() => act(`/content-items/${it.id}/schedule`, { method: "POST", body: {} })}>جدولة</button>`}
+      ${pub && html`<span class=${"badge p-" + pub.status}>${PSTATUS[pub.status]} · ${fmtTime(pub.scheduled_at)}</span>`}
       ${!["approved", "archived"].includes(it.status) && html`<button disabled=${busy} onClick=${() => onEdit(it)}>تعديل</button>`}
     </div>
   </div>`;
@@ -159,7 +164,10 @@ function EditModal({ it, onClose, onSaved }) {
 }
 
 function CampaignPage({ pid, cid }) {
-  const [c, reload] = useFetch(`/projects/${pid}/campaigns/${cid}`);
+  const [c, reloadC] = useFetch(`/projects/${pid}/campaigns/${cid}`);
+  const [pubs, reloadP] = useFetch(`/projects/${pid}/publications`);
+  const reload = () => { reloadC(); reloadP(); };
+  const [time, setTime] = useState("19:00");
   const [edit, setEdit] = useState(null);
   const [busy, setBusy] = useState(false);
   const pending = c && c.items.some((i) => i.status === "design_pending");
@@ -168,6 +176,9 @@ function CampaignPage({ pid, cid }) {
   const counts = c.items.reduce((m, i) => ((m[i.status] = (m[i.status] || 0) + 1), m), {});
   const run = async (path) => { setBusy(true); try { await api(path, { method: "POST" }); reload(); } catch {} finally { setBusy(false); } };
   const needDesign = c.items.filter((i) => ["ai_generated", "draft"].includes(i.status)).length;
+  const pubOf = (id) => (pubs || []).filter((p) => p.content_item_id === id && p.status !== "cancelled")[0];
+  const toSchedule = c.items.filter((i) => i.status === "approved" && !pubOf(i.id)).length;
+  const scheduleAll = async () => { setBusy(true); try { const r = await api(`/projects/${pid}/campaigns/${cid}/schedule-all`, { method: "POST", body: { time } }); if (r.skipped.length) toastSetter(`تعذّرت جدولة ${r.skipped.length} منشور`); reload(); } catch {} finally { setBusy(false); } };
   const reviewable = c.items.filter((i) => ["design_ready", "pending_approval"].includes(i.status)).length;
   return html`<p><a href=${`#/p/${pid}/campaigns`}>← الحملات</a></p>
     <h1>${c.name}</h1>
@@ -176,9 +187,11 @@ function CampaignPage({ pid, cid }) {
       <div class="actions">
         <button disabled=${busy || !needDesign} onClick=${() => run(`/projects/${pid}/campaigns/${cid}/designs`)}>توليد كل التصاميم (${needDesign})</button>
         <button class="primary" disabled=${busy || !reviewable} onClick=${() => run(`/projects/${pid}/campaigns/${cid}/approve-all`)}>اعتماد الكل (${reviewable})</button>
+        <span class="row" style="gap:6px;align-items:center"><input type="time" style="width:auto" value=${time} onInput=${(e) => setTime(e.target.value)} />
+          <button class="primary" disabled=${busy || !toSchedule} onClick=${scheduleAll}>جدولة المعتمد (${toSchedule})</button></span>
         <button onClick=${() => (location.hash = `#/p/${pid}/calendar`)}>عرض في التقويم</button>
       </div></div>
-    <div class="grid">${c.items.map((it) => html`<${ItemCard} key=${it.id} it=${it} reload=${reload} onEdit=${setEdit} />`)}</div>
+    <div class="grid">${c.items.map((it) => html`<${ItemCard} key=${it.id} it=${it} pub=${pubOf(it.id)} reload=${reload} onEdit=${setEdit} />`)}</div>
     ${edit && html`<${EditModal} it=${edit} onClose=${() => setEdit(null)} onSaved=${() => { setEdit(null); reload(); }} />`}`;
 }
 
@@ -195,6 +208,8 @@ function Calendar({ pid }) {
     first = weekStart(m1); last = addDays(weekStart(m2), 6);
   } else { first = weekStart(anchor); last = addDays(first, 6); }
   const [items, reload] = useFetch(`/projects/${pid}/calendar?start=${iso(first)}&end=${iso(last)}`);
+  const [pubs] = useFetch(`/projects/${pid}/publications`);
+  const pubOf = (id) => (pubs || []).filter((p) => p.content_item_id === id && p.status !== "cancelled")[0];
   const [sel, setSel] = useState(null);
   const days = []; for (let d = first; d <= last; d = addDays(d, 1)) days.push(d);
   const byDay = {}; (items || []).forEach((i) => (byDay[i.planned_date] = [...(byDay[i.planned_date] || []), i]));
@@ -212,7 +227,7 @@ function Calendar({ pid }) {
       ${days.map((d) => { const k = iso(d); const out = mode === "month" && d.getUTCMonth() !== anchor.getUTCMonth();
         return html`<div class=${"day" + (out ? " out" : "") + (k === today ? " today" : "")} style=${mode === "week" ? "min-height:220px" : ""}>
           <div class="n">${d.getUTCDate()}</div>
-          ${(byDay[k] || []).map((i) => html`<button class=${"chip s-" + i.status} title=${i.campaign_name} onClick=${() => setSel(i)}>${i.headline}</button>`)}</div>`; })}
+          ${(byDay[k] || []).map((i) => { const pb = pubOf(i.id); return html`<button class=${"chip " + (pb ? "p-" + pb.status : "s-" + i.status)} title=${i.campaign_name} onClick=${() => setSel(i)}>${pb && pb.status === "published" ? "✓ " : pb ? "⏰ " : ""}${i.headline}</button>`; })}</div>`; })}
     </div>
     ${items && items.length === 0 && html`<p class="muted">لا يوجد محتوى مجدول في هذه الفترة.</p>`}
     ${sel && html`<${CalendarDetail} it=${sel} onClose=${() => setSel(null)} onChanged=${() => { setSel(null); reload(); }} />`}`;
@@ -230,6 +245,40 @@ function CalendarDetail({ it, onClose, onChanged }) {
     <div class="actions" style="margin-top:12px">
       <button onClick=${onClose}>إغلاق</button></div>
   </div></div>`;
+}
+
+
+/* ---------- Publishing ---------- */
+function PubCard({ p, reload }) {
+  const [busy, setBusy] = useState(false);
+  const [url, setUrl] = useState("");
+  const act = async (path, body) => { setBusy(true); try { await api(path, { method: "POST", body: body || {} }); reload(); } catch {} finally { setBusy(false); } };
+  const copy = async () => { try { await navigator.clipboard.writeText(p.caption); toastSetter("تم نسخ النص"); } catch { toastSetter("تعذّر النسخ، انسخ النص يدويًا"); } };
+  return html`<div class="card item">
+    <div class="actions" style="justify-content:space-between"><strong>${PLATFORMS[p.platform] || p.platform}</strong><span class=${"badge p-" + p.status}>${PSTATUS[p.status]}</span></div>
+    <p class="muted" style="max-height:none">${fmtTime(p.scheduled_at)} · ${p.campaign_name}</p>
+    ${["awaiting_manual", "scheduled", "published", "failed"].includes(p.status) && html`<img src=${`${API}/content-items/${p.content_item_id}/design/image`} alt="" loading="lazy" onError=${(e) => (e.target.style.display = "none")} />`}
+    <h3>${p.headline}</h3><p style="max-height:none;color:var(--ink)">${p.caption}</p>
+    ${p.last_error && html`<p style="color:var(--bad);max-height:none">${p.last_error}</p>`}
+    <div class="actions">
+      ${p.status === "awaiting_manual" && html`<button onClick=${copy}>نسخ النص</button>
+        <a href=${`${API}/content-items/${p.content_item_id}/design/image`} download=${`post-${p.id.slice(0, 8)}.png`}><button type="button">تنزيل الصورة</button></a>
+        <input style="flex:1;min-width:140px" placeholder="رابط المنشور (اختياري)" value=${url} onInput=${(e) => setUrl(e.target.value)} />
+        <button class="primary" disabled=${busy} onClick=${() => act(`/publications/${p.id}/mark-published`, { url: url || null })}>تم النشر</button>`}
+      ${p.status === "published" && p.external_url && html`<a href=${p.external_url} target="_blank" rel="noopener">فتح المنشور</a>`}
+      ${p.status === "failed" && html`<button class="primary" disabled=${busy} onClick=${() => act(`/publications/${p.id}/retry`)}>إعادة المحاولة</button>`}
+      ${["scheduled", "awaiting_manual", "failed"].includes(p.status) && html`<button class="danger" disabled=${busy} onClick=${() => act(`/publications/${p.id}/cancel`)}>إلغاء</button>`}
+    </div></div>`;
+}
+
+function Publishing({ pid }) {
+  const [list, reload] = useFetch(`/projects/${pid}/publications`);
+  useEffect(() => { const t = setInterval(reload, 10000); return () => clearInterval(t); }, []);
+  if (!list) return html`<${Busy} text="تحميل..." />`;
+  const groups = [["awaiting_manual", "بانتظار النشر اليدوي"], ["failed", "فشل"], ["scheduled", "مجدول"], ["published", "تم النشر"]];
+  return html`<p class="muted">النشر الآلي على المنصات يتطلب ربط حساباتها. حاليًا يُجهَّز المنشور في موعده لتنشره يدويًا بنسخ النص وتنزيل الصورة.</p>
+    ${list.filter((p) => p.status !== "cancelled").length === 0 && html`<p class="muted">لا توجد منشورات مجدولة. اعتمد المنشورات في صفحة الحملة ثم اضغط "جدولة المعتمد".</p>`}
+    ${groups.map(([st, label]) => { const rows = list.filter((p) => p.status === st); return rows.length ? html`<h2>${label} (${rows.length})</h2><div class="grid">${rows.map((p) => html`<${PubCard} key=${p.id} p=${p} reload=${reload} />`)}</div>` : null; })}`;
 }
 
 /* ---------- Brand Brain ---------- */

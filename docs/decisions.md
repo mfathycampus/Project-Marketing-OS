@@ -38,3 +38,14 @@ Content status ends at APPROVED; scheduled/published/failed belong to per-platfo
 - Design worker: DB-backed queue (`design_jobs` is source of truth), in-process thread, atomic claim,
   crash recovery (processing -> pending on start). Move to Celery/Redis only when running multiple processes.
 - UI: no-build static app (Preact + htm vendored, RTL Arabic) served by FastAPI at `/ui/`.
+
+## Sprint 4 (scheduling + publishing)
+- `publications` table owns post-approval state per platform (scheduled -> publishing -> awaiting_manual|published|failed|cancelled).
+  Content status stays APPROVED, as designed.
+- `SocialProvider` interface; shipped providers: `manual` (default: at the due time the post is queued for hand
+  posting with copy-text/download-image) and `dryrun`. Real adapters register in `app/social/provider.py`.
+- Scheduler thread: atomic claim of due rows, retry with backoff (5min x attempt, max 3), crash recovery.
+  Times are stored in UTC; defaults computed from the project's timezone (Asia/Riyadh) at 19:00.
+- Why no Meta adapter yet: Instagram/Facebook publishing needs an approved Meta app (Business Verification, review
+  of `instagram_content_publish` / `pages_manage_posts`) and **publicly reachable image URLs**, which means object
+  storage (S3-compatible) instead of local disk. Both are prerequisites, not code.
