@@ -178,3 +178,9 @@ def test_jpeg_variant_of_design_image(client, approved, session, monkeypatch, tm
     r = client.get(f"/api/v1/content-items/{iid}/design/image", params={"format": "jpeg"})
     assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg" and r.content[:2] == b"\xff\xd8"
     assert client.get(f"/api/v1/content-items/{iid}/design/image").headers["content-type"] == "image/png"
+
+
+def test_scopes_are_configurable(monkeypatch):
+    monkeypatch.setattr(settings, "meta_scopes", "pages_show_list, pages_manage_posts")
+    url = meta.login_url(uuid.uuid4())
+    assert "scope=pages_show_list%2Cpages_manage_posts" in url and "instagram" not in url

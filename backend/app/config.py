@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     meta_app_secret: str = ""
     meta_redirect_uri: str = "http://localhost:8000/api/v1/meta/callback"
     meta_graph_version: str = "v23.0"
+    meta_scopes: str = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish"
     meta_config_id: str = ""  # only for 'Facebook Login for Business' apps (replaces scopes)
     public_base_url: str = ""  # public URL of this server; Instagram fetches images from it
     publish_provider: str = "manual"  # manual | dryrun (real platform providers plug in here)

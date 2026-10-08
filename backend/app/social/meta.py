@@ -66,7 +66,7 @@ def login_url(project_id: uuid.UUID) -> str:
     if settings.meta_config_id:
         q["config_id"] = settings.meta_config_id
     else:
-        q["scope"] = ",".join(SCOPES)
+        q["scope"] = ",".join(x.strip() for x in settings.meta_scopes.split(",") if x.strip()) or ",".join(SCOPES)
     return f"https://www.facebook.com/{settings.meta_graph_version}/dialog/oauth?{urlencode(q)}"
 
 
