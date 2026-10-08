@@ -9,10 +9,12 @@ from app.api.design_routes import router as design_router
 from app.api.routes import router
 from app.config import settings
 from app.designs.worker import DesignWorker
+from app.migrate import auto_migrate_if_sqlite
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    auto_migrate_if_sqlite()
     worker = DesignWorker() if settings.worker_enabled else None
     if worker:
         worker.start()

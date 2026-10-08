@@ -4,6 +4,7 @@ from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ROOT = Path(__file__).resolve().parents[2]  # repo root; .env may live here or in backend/
+_BACKEND = _ROOT / "backend"
 
 
 class Settings(BaseSettings):
@@ -30,7 +31,19 @@ class Settings(BaseSettings):
     canva_template_map: dict = {}  # {"offer_square": {"brand_template_id": "...", "fields": {"headline": "HEADLINE"}}}
     canva_poll_timeout_s: int = 60
     worker_enabled: bool = True
+    auto_migrate: bool = True  # sqlite only: create/upgrade tables on startup
     worker_poll_interval_s: float = 1.0
+
+    @field_validator("database_url", mode="after")
+    @classmethod
+    def _anchor_sqlite_path(cls, v: str) -> str:
+        """A relative sqlite path must not depend on the directory uvicorn was started from."""
+        prefix = "sqlite:///"
+        if v.startswith(prefix):
+            path = v[len(prefix):]
+            if path and path != ":memory:" and not Path(path).is_absolute() and not path.startswith("/"):
+                return prefix + (_BACKEND / path).as_posix()
+        return v
 
     @field_validator("encryption_key", "canva_client_id", "canva_client_secret", "anthropic_api_key", mode="before")
     @classmethod

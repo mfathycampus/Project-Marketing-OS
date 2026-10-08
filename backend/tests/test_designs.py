@@ -204,3 +204,24 @@ def test_canva_template_discovery_endpoints(client, monkeypatch):
     assert client.get("/api/v1/canva/brand-templates").json() == [{"id": "BT1", "title": "Offer"}]
     r = client.get("/api/v1/canva/brand-templates/BT1/dataset", params={"template_key": "offer_square"}).json()
     assert r["template_map_entry"] == {"offer_square": {"brand_template_id": "BT1", "fields": {"headline": "HEADLINE", "cta": "CTA"}}}
+
+
+def test_relative_sqlite_path_is_anchored_to_backend_dir():
+    from app.config import _BACKEND, Settings
+
+    s = Settings(database_url="sqlite:///./marketing.db", _env_file=None)
+    assert s.database_url == "sqlite:///" + (_BACKEND / "marketing.db").as_posix()
+    assert Settings(database_url="sqlite://", _env_file=None).database_url == "sqlite://"
+    assert Settings(database_url="postgresql+psycopg://u:p@h/db", _env_file=None).database_url.startswith("postgresql")
+
+
+def test_auto_migrate_creates_tables_on_fresh_sqlite(tmp_path, monkeypatch):
+    import sqlite3
+
+    from app import migrate
+
+    db = tmp_path / "fresh.db"
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{db.as_posix()}")
+    assert migrate.auto_migrate_if_sqlite() is True
+    tables = {r[0] for r in sqlite3.connect(db).execute("select name from sqlite_master where type='table'")}
+    assert {"design_jobs", "projects", "content_status_history"} <= tables
