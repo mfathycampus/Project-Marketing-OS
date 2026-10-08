@@ -2,7 +2,7 @@
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 Platform = Literal["instagram", "facebook", "tiktok", "linkedin", "x"]
 
@@ -16,11 +16,23 @@ CAPTION_LIMITS: dict[str, int] = {
 HEADLINE_MAX = 60  # must fit design templates
 
 
+class DesignFields(BaseModel):
+    """Explicit (closed) fields: structured outputs require closed objects, not free-form dicts."""
+
+    price: str = Field(default="", description="Price text exactly as listed in products, or empty")
+    description: str = Field(default="", description="Short line for the design, max 140 chars, or empty")
+
+
 class DesignSpec(BaseModel):
     """Internal design schema. Template mappers translate this to Canva/HTML fields."""
 
     template_key: str = Field(description="One of the allowed template keys")
-    fields: dict[str, str] = Field(default_factory=dict)
+    fields: DesignFields = Field(default_factory=DesignFields)
+
+    @field_validator("fields", mode="before")
+    @classmethod
+    def _lowercase_keys(cls, v):
+        return {str(k).lower(): val for k, val in v.items()} if isinstance(v, dict) else v
 
 
 class ContentItemOut(BaseModel):

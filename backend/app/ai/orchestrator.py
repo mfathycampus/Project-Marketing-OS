@@ -1,4 +1,5 @@
 """AIOrchestrator: the single entry point for all LLM-powered operations."""
+import json
 import uuid
 from datetime import date, timedelta
 from pathlib import Path
@@ -82,7 +83,7 @@ class AIOrchestrator:
                 error = str(exc)
                 if result is not None:  # ask the model to repair its own output
                     llm_req.history = [
-                        {"role": "assistant", "content": str(result.data)},
+                        {"role": "assistant", "content": json.dumps(result.data, ensure_ascii=False)},
                         {"role": "user", "content": f"The output was invalid: {error}\nFix it."},
                     ]
             except Exception as exc:  # provider/network failure

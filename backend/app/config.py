@@ -16,7 +16,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5-5"
     ai_provider: str = "anthropic"  # anthropic | fake
-    ai_max_output_tokens: int = 4096
+    ai_max_output_tokens: int = 16000  # includes thinking tokens
+    ai_effort: str = "medium"  # low | medium | high | xhigh | max
 
 
     storage_dir: str = "./var/storage"

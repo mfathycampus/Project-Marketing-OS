@@ -1,4 +1,5 @@
 """LLM provider boundary. Only this module (and its implementations) touch the SDK."""
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -41,16 +42,16 @@ class AnthropicProvider:
         self.model = model or settings.anthropic_model
 
     def generate_structured(self, req: LLMRequest) -> LLMResult:
+        import anthropic
+
         system = [{"type": "text", "text": req.instructions}]
         if req.stable_context:
             system.append(
                 {"type": "text", "text": req.stable_context, "cache_control": {"type": "ephemeral"}}
             )
-        tool = {
-            "name": req.tool_name,
-            "description": "Submit the final structured result.",
-            "input_schema": req.output_model.model_json_schema(),
-        }
+        # Structured outputs: the response is constrained to this schema. Forced tool_choice is
+        # rejected by Claude 5.x models, and output_config.format is the supported replacement.
+        schema = anthropic.transform_schema(req.output_model)
         messages = [{"role": "user", "content": req.user_message}, *req.history]
         started = time.monotonic()
         resp = self._client.messages.create(
@@ -58,15 +59,16 @@ class AnthropicProvider:
             max_tokens=settings.ai_max_output_tokens,
             system=system,
             messages=messages,
-            tools=[tool],
-            tool_choice={"type": "tool", "name": req.tool_name},
+            output_config={"effort": settings.ai_effort, "format": {"type": "json_schema", "schema": schema}},
         )
-        block = next((b for b in resp.content if b.type == "tool_use"), None)
-        if block is None:
-            raise ValueError("model returned no tool_use block")
+        if resp.stop_reason in ("max_tokens", "refusal"):
+            raise ValueError(f"model stopped early: {resp.stop_reason}")
+        text = next((b.text for b in resp.content if b.type == "text"), None)  # thinking blocks may come first
+        if text is None:
+            raise ValueError("model returned no text block")
         u = resp.usage
         return LLMResult(
-            data=dict(block.input),
+            data=json.loads(text),
             model=self.model,
             input_tokens=u.input_tokens,
             output_tokens=u.output_tokens,
