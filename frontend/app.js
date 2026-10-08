@@ -120,6 +120,19 @@ function Campaigns({ pid }) {
       <a class="card" style="text-decoration:none;color:inherit" href=${`#/p/${pid}/c/${c.id}`}><h2>${c.name}</h2><span class="muted">${OBJECTIVES[c.objective] || c.objective} · ${c.start_date || ""}</span></a>`)}</div>`}`;
 }
 
+const toLocalInput = (iso) => { const d = new Date(iso); const z = new Date(d.getTime() - d.getTimezoneOffset() * 6e4); return z.toISOString().slice(0, 16); };
+
+function ScheduleEditor({ pub, onDone }) {
+  const [when, setWhen] = useState(toLocalInput(pub.scheduled_at));
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setWhen(toLocalInput(pub.scheduled_at)), [pub.scheduled_at]);
+  const save = async (iso) => { setBusy(true); try { await api(`/publications/${pub.id}/reschedule`, { method: "POST", body: { scheduled_at: iso } }); onDone(); } catch {} finally { setBusy(false); } };
+  return html`<div class="row" style="width:100%;align-items:center;gap:6px">
+    <input type="datetime-local" style="flex:1;min-width:160px" value=${when} onInput=${(e) => setWhen(e.target.value)} />
+    <button disabled=${busy || !when} onClick=${() => save(new Date(when).toISOString())}>حفظ الموعد</button>
+    <button class="primary" disabled=${busy} onClick=${() => save(new Date().toISOString())}>انشر الآن</button></div>`;
+}
+
 /* ---------- Campaign review ---------- */
 function ItemCard({ it, pub, reload, onEdit }) {
   const [busy, setBusy] = useState(false);
@@ -141,6 +154,7 @@ function ItemCard({ it, pub, reload, onEdit }) {
       ${it.status === "rejected" && html`<button disabled=${busy} onClick=${() => act(`/content-items/${it.id}/transition?to=draft`)}>إعادة لمسودة</button>`}
       ${it.status === "approved" && !pub && html`<button class="primary" disabled=${busy} onClick=${() => act(`/content-items/${it.id}/schedule`, { method: "POST", body: {} })}>جدولة</button>`}
       ${pub && html`<span class=${"badge p-" + pub.status}>${PSTATUS[pub.status]} · ${fmtTime(pub.scheduled_at)}</span>`}
+      ${pub && ["scheduled", "failed"].includes(pub.status) && html`<${ScheduleEditor} pub=${pub} onDone=${reload} />`}
       ${!["approved", "archived"].includes(it.status) && html`<button disabled=${busy} onClick=${() => onEdit(it)}>تعديل</button>`}
     </div>
   </div>`;
@@ -274,13 +288,10 @@ function Connections({ pid, query }) {
   </div>`;
 }
 
-const toLocalInput = (iso) => { const d = new Date(iso); const z = new Date(d.getTime() - d.getTimezoneOffset() * 6e4); return z.toISOString().slice(0, 16); };
 
 function PubCard({ p, reload }) {
   const [busy, setBusy] = useState(false);
   const [url, setUrl] = useState("");
-  const [when, setWhen] = useState(toLocalInput(p.scheduled_at));
-  useEffect(() => setWhen(toLocalInput(p.scheduled_at)), [p.scheduled_at]);
   const act = async (path, body) => { setBusy(true); try { await api(path, { method: "POST", body: body || {} }); reload(); } catch {} finally { setBusy(false); } };
   const copy = async () => { try { await navigator.clipboard.writeText(p.caption); toastSetter("تم نسخ النص"); } catch { toastSetter("تعذّر النسخ، انسخ النص يدويًا"); } };
   return html`<div class="card item">
@@ -295,10 +306,7 @@ function PubCard({ p, reload }) {
         <input style="flex:1;min-width:140px" placeholder="رابط المنشور (اختياري)" value=${url} onInput=${(e) => setUrl(e.target.value)} />
         <button class="primary" disabled=${busy} onClick=${() => act(`/publications/${p.id}/mark-published`, { url: url || null })}>تم النشر</button>`}
       ${p.status === "published" && p.external_url && html`<a href=${p.external_url} target="_blank" rel="noopener">فتح المنشور</a>`}
-      ${["scheduled", "failed"].includes(p.status) && html`<div class="row" style="width:100%;align-items:center;gap:6px">
-        <input type="datetime-local" style="flex:1;min-width:160px" value=${when} onInput=${(e) => setWhen(e.target.value)} />
-        <button disabled=${busy || !when} onClick=${() => act(`/publications/${p.id}/reschedule`, { scheduled_at: new Date(when).toISOString() })}>حفظ الموعد</button>
-        <button class="primary" disabled=${busy} onClick=${() => act(`/publications/${p.id}/reschedule`, { scheduled_at: new Date().toISOString() })}>انشر الآن</button></div>`}
+      ${["scheduled", "failed"].includes(p.status) && html`<${ScheduleEditor} pub=${p} onDone=${reload} />`}
       ${p.status === "failed" && html`<button disabled=${busy} onClick=${() => act(`/publications/${p.id}/retry`)}>إعادة المحاولة</button>`}
       ${["scheduled", "awaiting_manual", "failed"].includes(p.status) && html`<button class="danger" disabled=${busy} onClick=${() => act(`/publications/${p.id}/cancel`)}>إلغاء</button>`}
     </div></div>`;
