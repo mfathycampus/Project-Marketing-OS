@@ -34,7 +34,22 @@ def main() -> None:
     for name in ("canva_client_id", "canva_client_secret", "anthropic_api_key"):
         v = getattr(settings, name)
         print(f"{name.upper()}: {'set (%d chars)' % len(v) if v else 'EMPTY'}")
+    for name in ("meta_app_id", "meta_app_secret"):
+        v = getattr(settings, name)
+        print(f"{name.upper()}: {'set (%d chars)' % len(v) if v else 'EMPTY'}")
+    print("META_REDIRECT_URI:", settings.meta_redirect_uri)
+    print("PUBLIC_BASE_URL:", settings.public_base_url or "(not set)")
     print("DESIGN_PROVIDER:", settings.design_provider)
+    # Which variable NAMES each .env actually contains (values never printed): catches typos/extra spaces.
+    for path in (_ROOT / ".env", _ROOT / "backend" / ".env"):
+        if path.exists():
+            names = []
+            for line in path.read_bytes().decode("utf-8-sig", "replace").splitlines():
+                if line.strip() and not line.lstrip().startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    flag = " <- SPACE BEFORE '='" if k != k.rstrip() else ""
+                    names.append(f"{k.strip()}{'(empty)' if not v.strip() else ''}{flag}")
+            print(f"{path} defines: {', '.join(names)}")
     print("DATABASE_URL scheme:", settings.database_url.split(":", 1)[0])
 
 
