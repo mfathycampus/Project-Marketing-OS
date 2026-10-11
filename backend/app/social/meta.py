@@ -101,6 +101,26 @@ class MetaClient:
             "fields": "id,name,access_token,instagram_business_account{id,username}", "access_token": user_token})
         return d.get("data", [])
 
+    def granted_page_ids(self, user_token: str) -> list[str]:
+        """Pages the user selected for this app (granular scopes). Works when /me/accounts comes back empty."""
+        try:
+            d = self._call("GET", _graph("/debug_token"), params={
+                "input_token": user_token, "access_token": f"{settings.meta_app_id}|{settings.meta_app_secret}"})
+        except MetaError:
+            return []
+        ids: list[str] = []
+        for g in d.get("data", {}).get("granular_scopes", []):
+            if g.get("scope") in ("pages_show_list", "pages_manage_posts", "pages_read_engagement"):
+                ids += [str(i) for i in g.get("target_ids", [])]
+        return list(dict.fromkeys(ids))
+
+    def page_by_id(self, page_id: str, user_token: str) -> dict | None:
+        try:
+            return self._call("GET", _graph(f"/{page_id}"), params={
+                "fields": "id,name,access_token,instagram_business_account{id,username}", "access_token": user_token})
+        except MetaError:
+            return None
+
     def whoami(self, user_token: str) -> dict:
         """Account name + granted permissions: explains an empty page list. Never returns tokens."""
         out = {"name": "", "granted": [], "declined": []}

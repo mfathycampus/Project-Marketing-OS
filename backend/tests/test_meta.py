@@ -205,3 +205,36 @@ def test_whoami_lists_granted_permissions(session):
 
     w = fake_client(handler).whoami("T")
     assert w == {"name": "Me", "granted": ["pages_show_list"], "declined": ["pages_manage_posts"]}
+
+
+def test_granular_page_lookup_when_me_accounts_is_empty(client, monkeypatch):
+    pid = client.post("/api/v1/projects", json={"name": "P"}).json()["id"]
+    page = {"id": "P9", "name": "Business Page", "access_token": "PT"}
+    monkeypatch.setattr(meta.MetaClient, "exchange_code", lambda self, code: "LONG")
+    monkeypatch.setattr(meta.MetaClient, "pages", lambda self, tok: [])
+    monkeypatch.setattr(meta.MetaClient, "granted_page_ids", lambda self, tok: ["P9"])
+    monkeypatch.setattr(meta.MetaClient, "page_by_id", lambda self, i, tok: page if i == "P9" else None)
+    r = client.get("/api/v1/meta/callback", params={"state": meta.make_state(uuid.UUID(pid)), "code": "c"}, follow_redirects=False)
+    assert r.headers["location"].endswith("publish?connected=1")
+    assert client.get(f"/api/v1/projects/{pid}/social-connections").json()[0]["account_name"] == "Business Page"
+
+
+def test_granted_page_ids_reads_debug_token(session):
+    def handler(req):
+        assert "debug_token" in req.url.path and "123%7Csec" in str(req.url)
+        return httpx.Response(200, json={"data": {"granular_scopes": [
+            {"scope": "pages_manage_posts", "target_ids": ["A", "B"]}, {"scope": "pages_show_list", "target_ids": ["A"]},
+            {"scope": "public_profile"}]}})
+
+    assert fake_client(handler).granted_page_ids("T") == ["A", "B"]
+
+
+def test_empty_pages_hint_explains_page_selection(client, monkeypatch):
+    pid = client.post("/api/v1/projects", json={"name": "P"}).json()["id"]
+    monkeypatch.setattr(meta.MetaClient, "exchange_code", lambda self, code: "LONG")
+    monkeypatch.setattr(meta.MetaClient, "pages", lambda self, tok: [])
+    monkeypatch.setattr(meta.MetaClient, "granted_page_ids", lambda self, tok: [])
+    monkeypatch.setattr(meta.MetaClient, "whoami", lambda self, tok: {"name": "M", "granted": ["pages_show_list"], "declined": []})
+    from urllib.parse import unquote
+    r = client.get("/api/v1/meta/callback", params={"state": meta.make_state(uuid.UUID(pid)), "code": "c"}, follow_redirects=False)
+    assert "business_tools" in unquote(r.headers["location"])

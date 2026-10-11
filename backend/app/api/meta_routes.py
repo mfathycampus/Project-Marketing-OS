@@ -61,12 +61,18 @@ def meta_callback(state: str, code: str | None = None, error: str | None = None,
         pages = client.pages(token)
     except (meta.MetaError, Exception) as exc:  # noqa: BLE001 - shown to the user, never contains tokens
         return _ui(project_id, "meta_error=" + quote(str(exc)[:300]))
+    if not pages:  # /me/accounts can be empty for Business-owned Pages: look up the granted ones directly
+        pages = [pg for pg in (client.page_by_id(i, token) for i in client.granted_page_ids(token))
+                 if pg and pg.get("access_token")]
     if not pages:
         who = client.whoami(token)
         hint = (f"لم تُرجع Meta أي صفحة. الحساب: {who['name'] or 'غير معروف'}. "
                 f"الصلاحيات الممنوحة: {', '.join(who['granted']) or 'لا شيء'}")
         if "pages_show_list" not in who["granted"]:
             hint += " | ناقصة pages_show_list"
+        else:
+            hint += (" | الصلاحيات ممنوحة لكن لم تُحدَّد صفحة في موافقة Facebook: افتح "
+                     "facebook.com/settings?tab=business_tools ← تطبيقك ← View and edit ← حدّد الصفحة ثم احفظ، وأعد الربط")
         return _ui(project_id, "meta_error=" + quote(hint))
     if len(pages) == 1:
         meta.save_selection(session, project_id, pages[0])
