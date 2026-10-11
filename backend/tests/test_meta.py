@@ -190,6 +190,7 @@ def test_empty_pages_error_names_account_and_granted_permissions(client, monkeyp
     pid = client.post("/api/v1/projects", json={"name": "P"}).json()["id"]
     monkeypatch.setattr(meta.MetaClient, "exchange_code", lambda self, code: "LONG")
     monkeypatch.setattr(meta.MetaClient, "pages", lambda self, tok: [])
+    monkeypatch.setattr(meta.MetaClient, "granted_page_ids", lambda self, tok: [])
     monkeypatch.setattr(meta.MetaClient, "whoami", lambda self, tok: {"name": "Mohammed", "granted": ["public_profile"], "declined": []})
     r = client.get("/api/v1/meta/callback", params={"state": meta.make_state(uuid.UUID(pid)), "code": "c"}, follow_redirects=False)
     from urllib.parse import unquote
@@ -238,3 +239,12 @@ def test_empty_pages_hint_explains_page_selection(client, monkeypatch):
     from urllib.parse import unquote
     r = client.get("/api/v1/meta/callback", params={"state": meta.make_state(uuid.UUID(pid)), "code": "c"}, follow_redirects=False)
     assert "business_tools" in unquote(r.headers["location"])
+
+
+def test_lookup_helpers_survive_network_errors():
+    def boom(req):
+        raise httpx.ConnectError("offline")
+
+    c = fake_client(boom)
+    assert c.granted_page_ids("T") == [] and c.page_by_id("1", "T") is None
+    assert c.whoami("T") == {"name": "", "granted": [], "declined": []}

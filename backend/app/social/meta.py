@@ -106,7 +106,7 @@ class MetaClient:
         try:
             d = self._call("GET", _graph("/debug_token"), params={
                 "input_token": user_token, "access_token": f"{settings.meta_app_id}|{settings.meta_app_secret}"})
-        except MetaError:
+        except (MetaError, httpx.HTTPError):
             return []
         ids: list[str] = []
         for g in d.get("data", {}).get("granular_scopes", []):
@@ -118,7 +118,7 @@ class MetaClient:
         try:
             return self._call("GET", _graph(f"/{page_id}"), params={
                 "fields": "id,name,access_token,instagram_business_account{id,username}", "access_token": user_token})
-        except MetaError:
+        except (MetaError, httpx.HTTPError):
             return None
 
     def whoami(self, user_token: str) -> dict:
@@ -129,7 +129,7 @@ class MetaClient:
             perms = self._call("GET", _graph("/me/permissions"), params={"access_token": user_token}).get("data", [])
             out["granted"] = [x["permission"] for x in perms if x.get("status") == "granted"]
             out["declined"] = [x["permission"] for x in perms if x.get("status") != "granted"]
-        except MetaError:
+        except (MetaError, httpx.HTTPError):
             pass
         return out
 
