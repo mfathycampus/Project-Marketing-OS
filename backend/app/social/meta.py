@@ -159,7 +159,8 @@ class MetaProvider:
         except MetaError as exc:
             if exc.code in AUTH_CODES:
                 self.conn.status = "expired"
-                raise PermanentPublishError(f"انتهت صلاحية ربط {self.conn.platform}، أعد الربط ({exc})") from exc
+                self.conn.last_error = f"({exc.code}) {exc}"[:500]
+                raise PermanentPublishError(f"يحتاج ربط {self.conn.platform} إلى إعادة ({exc.code}): {exc}") from exc
             raise
 
     def _facebook(self, token: str, p: PublishPayload) -> PublishResult:
@@ -234,5 +235,6 @@ def save_selection(session: Session, project_id: uuid.UUID, page: dict) -> list[
             session.add(conn)
         else:
             conn.account_id, conn.account_name, conn.token_enc, conn.status = account_id, name, encrypt(token), "active"
+            conn.last_error = None
         out.append(conn)
     return out

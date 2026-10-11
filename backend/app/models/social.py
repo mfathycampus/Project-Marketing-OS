@@ -19,6 +19,7 @@ class SocialConnection(Base, IdMixin, TimestampMixin):
     account_name: Mapped[str] = mapped_column(String(200), default="")
     token_enc: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="active")  # active | expired
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)  # Meta's message when it needed reconnecting
 
 
 class MetaPending(Base, IdMixin):

@@ -102,7 +102,7 @@ def test_expired_token_marks_connection_and_is_permanent(session):
     prov = meta.MetaProvider(c, session, fake_client(lambda r: httpx.Response(400, json={"error": {"message": "Session has expired", "code": 190}})))
     with pytest.raises(PermanentPublishError):
         prov.publish(PublishPayload("facebook", "h", "c", "c"))
-    assert c.status == "expired"
+    assert c.status == "expired" and "Session has expired" in c.last_error and "190" in c.last_error
 
 
 def test_connect_flow_single_page_connects_and_multi_page_asks(client, session, monkeypatch):
