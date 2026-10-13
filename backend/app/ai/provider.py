@@ -91,7 +91,31 @@ class FakeProvider:
         return LLMResult(data=data, model=self.model)
 
 
+def _free_chain() -> list[LLMProvider]:
+    import os
+
+    from dotenv import dotenv_values
+
+    from app.ai.free_providers import build_free_providers
+
+    env: dict[str, str] = {}
+    for f in settings.model_config.get("env_file") or ():  # same files Settings reads
+        env.update({k: v for k, v in dotenv_values(f, encoding="utf-8-sig").items() if v})
+    env.update(os.environ)  # real environment wins over .env
+    names = [n for n in settings.free_llm_providers.split(",") if n.strip()]
+    return build_free_providers(names, env)
+
+
 def get_provider() -> LLMProvider:
     if settings.ai_provider == "fake":
         return FakeProvider()
+    if settings.ai_provider in ("free", "hybrid"):
+        from app.ai.free_providers import RouterProvider
+
+        chain = _free_chain()
+        if settings.ai_provider == "hybrid":
+            chain.append(AnthropicProvider())
+        if not chain:
+            raise RuntimeError("AI_PROVIDER=%s but no free provider API key is set" % settings.ai_provider)
+        return RouterProvider(chain, cooldown_s=settings.free_llm_cooldown_s)
     return AnthropicProvider()
