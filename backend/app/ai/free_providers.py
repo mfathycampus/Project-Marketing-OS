@@ -19,21 +19,22 @@ class FreeProviderSpec:
     name: str
     base_url: str
     default_model: str
+    key_url: str = ""  # where a person creates a key (manual signup; never automated)
 
 
 CATALOG: dict[str, FreeProviderSpec] = {
     s.name: s
     for s in (
-        FreeProviderSpec("groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
+        FreeProviderSpec("groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", "https://console.groq.com/keys"),
         FreeProviderSpec(
-            "gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.0-flash"
+            "gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.0-flash", "https://aistudio.google.com/apikey"
         ),
-        FreeProviderSpec("cerebras", "https://api.cerebras.ai/v1", "llama-3.3-70b"),
-        FreeProviderSpec("mistral", "https://api.mistral.ai/v1", "mistral-small-latest"),
+        FreeProviderSpec("cerebras", "https://api.cerebras.ai/v1", "llama-3.3-70b", "https://cloud.cerebras.ai"),
+        FreeProviderSpec("mistral", "https://api.mistral.ai/v1", "mistral-small-latest", "https://console.mistral.ai/api-keys"),
         FreeProviderSpec(
-            "openrouter", "https://openrouter.ai/api/v1", "meta-llama/llama-3.3-70b-instruct:free"
+            "openrouter", "https://openrouter.ai/api/v1", "meta-llama/llama-3.3-70b-instruct:free", "https://openrouter.ai/keys"
         ),
-        FreeProviderSpec("nvidia", "https://integrate.api.nvidia.com/v1", "meta/llama-3.3-70b-instruct"),
+        FreeProviderSpec("nvidia", "https://integrate.api.nvidia.com/v1", "meta/llama-3.3-70b-instruct", "https://build.nvidia.com/settings/api-keys"),
     )
 }
 
