@@ -12,6 +12,9 @@ dependencies = [
   "anthropic>=0.40",
   "psycopg[binary]>=3.1",
   "pillow>=10",  # JPEG conversion for Instagram
+  "playwright>=1.40",  # renders the HTML designs to PNG (then: playwright install chromium)
+  "cryptography>=42",  # encrypts stored tokens (Fernet)
+  "httpx>=0.27",
   "tzdata>=2024.1",  # IANA timezones on Windows
 ]
 

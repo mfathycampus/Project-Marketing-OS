@@ -27,19 +27,26 @@ def _launch(p):
     """Launch Chromium; fall back to any installed build when Playwright's pinned one is missing."""
     try:
         return p.chromium.launch()
-    except Exception:
+    except Exception as first:
         root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers")
         for pattern in ("chromium-*/chrome-linux*/chrome", "chromium/chrome-linux*/chrome", "chromium/chrome"):
             for exe in sorted(glob.glob(os.path.join(root, pattern)), reverse=True):
                 return p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-        raise
+        raise RuntimeError(
+            "متصفح Chromium غير مثبت لـ playwright. نفّذ: python -m playwright install chromium ثم أعد المحاولة "
+            f"({str(first).splitlines()[0][:120]})") from first
 
 
 class HtmlRenderer:
     name = "html"
 
     def render(self, req: DesignRequest) -> DesignResult:
-        from playwright.sync_api import sync_playwright
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError as exc:
+            raise RuntimeError(
+                "حزمة playwright غير مثبتة في بيئة Python التي تشغّل الخادم. نفّذ: "
+                "python -m pip install playwright ثم python -m playwright install chromium، وأعد تشغيل الخادم") from exc
 
         spec = REGISTRY[req.template_key]
         html = render_html(req)

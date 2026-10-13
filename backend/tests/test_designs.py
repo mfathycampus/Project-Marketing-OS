@@ -225,3 +225,23 @@ def test_auto_migrate_creates_tables_on_fresh_sqlite(tmp_path, monkeypatch):
     assert migrate.auto_migrate_if_sqlite() is True
     tables = {r[0] for r in sqlite3.connect(db).execute("select name from sqlite_master where type='table'")}
     assert {"design_jobs", "projects", "content_status_history"} <= tables
+
+
+def test_renderer_explains_missing_playwright(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", None)  # makes `from playwright.sync_api import ...` fail
+    with pytest.raises(RuntimeError, match="playwright install chromium"):
+        HtmlRenderer().render(DesignRequest("offer_square", {"headline": "h", "cta": "c"}))
+
+
+def test_renderer_explains_missing_chromium(monkeypatch):
+    from app.designs import html_renderer
+
+    class Chromium:
+        def launch(self, **kw):
+            raise Exception("Executable doesn't exist at C:\\\\x")
+
+    monkeypatch.setattr(html_renderer.glob, "glob", lambda *a, **k: [])
+    with pytest.raises(RuntimeError, match="Chromium"):
+        html_renderer._launch(type("P", (), {"chromium": Chromium()})())
