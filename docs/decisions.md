@@ -28,3 +28,13 @@ Content status ends at APPROVED; scheduled/published/failed belong to per-platfo
   is implemented against **mocked** HTTP only. canva.dev was unreachable from the build sandbox, so endpoint paths
   and payloads are from memory and MUST be verified against a live Canva app (`/canva/status`) before use.
 - Known gap: Canva refresh uses no row lock yet; polling is synchronous inside the request (worker in Sprint 3).
+
+## Free LLM providers (failover router)
+`AI_PROVIDER=free|hybrid` routes generation through `app/ai/free_providers.py`: OpenAI-compatible
+free tiers (catalogue from mnfst/awesome-free-llm-apis) tried in order, with a 60s cooldown for a
+provider after 429/5xx/auth errors. `hybrid` appends Anthropic as the final fallback. Free tiers may
+log or train on prompts: don't send customer personal data. Output quality varies by model; the
+orchestrator's validation + one repair retry still applies. Model names/limits drift: override via env.
+Keys: `python -m app.ai.key_check [--setup]` verifies keys (GET /models, no quota used) and saves valid
+ones to the gitignored repo-root `.env` (hidden prompt, never echoed). Keys are created manually by the
+operator on each provider's site; account/key creation is deliberately not automated (provider ToS).
