@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     meta_redirect_uri: str = "http://localhost:8000/api/v1/meta/callback"
     meta_graph_version: str = "v23.0"
     meta_scopes: str = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish"
+    linkedin_client_id: str = ""
+    linkedin_client_secret: str = ""
+    linkedin_redirect_uri: str = "http://localhost:8000/api/v1/linkedin/callback"
+    linkedin_api_version: str = "202510"  # YYYYMM; LinkedIn retires old versions after ~a year
+    linkedin_scopes: str = "r_organization_social w_organization_social rw_organization_admin"
     meta_config_id: str = ""  # only for 'Facebook Login for Business' apps (replaces scopes)
     public_base_url: str = ""  # public URL of this server; Instagram fetches images from it
     publish_provider: str = "manual"  # manual | dryrun (real platform providers plug in here)
@@ -56,7 +61,7 @@ class Settings(BaseSettings):
                 return prefix + (_BACKEND / path).as_posix()
         return v
 
-    @field_validator("encryption_key", "canva_client_id", "canva_client_secret", "anthropic_api_key", "meta_app_id", "meta_app_secret", mode="before")
+    @field_validator("encryption_key", "canva_client_id", "canva_client_secret", "anthropic_api_key", "meta_app_id", "meta_app_secret", "linkedin_client_id", "linkedin_client_secret", mode="before")
     @classmethod
     def _clean_secret(cls, v):
         """Tolerate quotes, stray whitespace and inline '# comments' pasted into .env."""

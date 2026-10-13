@@ -66,3 +66,10 @@ Content status ends at APPROVED; scheduled/published/failed belong to per-platfo
 - Variants lock once their publication is scheduled/published. A platform without a connection stays manual.
 - Instagram guards: public URL required, JPEG conversion, aspect ratio 4:5..1.91:1 checked before calling Meta.
 - AIOrchestrator._run is the shared call/validate/repair/audit path for every LLM operation.
+
+## LinkedIn (company page)
+- `app/social/linkedin.py`: OAuth (state signed like Meta's but tagged `li`), admin-organization discovery, image upload,
+  `/rest/posts` publishing as `urn:li:organization:<id>`, commentary escaping, token expiry (`social_connections.expires_at`).
+- Unverified against live LinkedIn (docs unreachable from the sandbox). Organization posting needs LinkedIn's approval of the
+  Community Management API product; until then LinkedIn stays on the manual provider.
+- Tokens last ~60 days; the UI shows the expiry and the provider fails permanently (no retries) once it passes or on 401/403.

@@ -57,10 +57,14 @@ _PROVIDERS = {"manual": ManualProvider, "dryrun": DryRunProvider}
 
 def get_social_provider(platform: str, session=None, project_id=None) -> SocialProvider:
     """A connected account for this project+platform wins; otherwise the configured default (manual)."""
-    if session is not None and project_id is not None and platform in ("facebook", "instagram"):
-        from app.social.meta import provider_for
-
-        connected = provider_for(session, project_id, platform)
+    if session is not None and project_id is not None:
+        if platform in ("facebook", "instagram"):
+            from app.social.meta import provider_for
+        elif platform == "linkedin":
+            from app.social.linkedin import provider_for
+        else:
+            provider_for = None
+        connected = provider_for(session, project_id, platform) if provider_for else None
         if connected is not None:
             return connected
     return _PROVIDERS.get(settings.publish_provider, ManualProvider)()

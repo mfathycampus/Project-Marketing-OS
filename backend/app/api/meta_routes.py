@@ -112,7 +112,7 @@ def select_page(body: SelectIn, session: Session = Depends(get_session)):
 def list_connections(project_id: uuid.UUID, session: Session = Depends(get_session)):
     rows = session.scalars(select(SocialConnection).where(SocialConnection.project_id == project_id))
     return [{"id": c.id, "platform": c.platform, "account_name": c.account_name, "status": c.status,
-             "last_error": c.last_error} for c in rows]
+             "last_error": c.last_error, "expires_at": c.expires_at} for c in rows]
 
 
 @router.delete("/projects/{project_id}/social-connections/{conn_id}", status_code=204)

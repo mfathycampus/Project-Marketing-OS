@@ -108,6 +108,7 @@ project-marketing-os/
 | 0005 | `social_connections`, `meta_pending` |
 | 0006 | `content_variants` |
 | 0007 | `social_connections.last_error` |
+| 0008 | `social_connections.expires_at` |
 
 ### آلة حالات المحتوى
 
@@ -177,6 +178,11 @@ failed → scheduled (إعادة محاولة)    scheduled/awaiting_manual/fail
 - `META_SCOPES` قابلة للتعديل دون كود، و`META_CONFIG_ID` لتطبيقات Facebook Login for Business.
 - **جُرّب فعليًا:** نُشر منشور على صفحة Maeen بنجاح.
 
+### 5.7.1 لينكدإن (صفحة شركة)
+- `app/social/linkedin.py` و`linkedin_routes.py`: ربط OAuth، اكتشاف الصفحات التي تديرها، رفع الصورة، النشر عبر `/rest/posts` باسم الصفحة، وتهريب الرموز الخاصة في النص.
+- التوكن ~60 يومًا وتاريخ انتهائه يظهر في الواجهة. فشل 401/403 يعلّم الربط ويوقف إعادة المحاولة.
+- **غير مجرَّب على LinkedIn الحقيقي.** والنشر على صفحة شركة يتطلب موافقة LinkedIn على منتج Community Management API لتطبيقك. الدليل: `docs/linkedin-setup-ar.md`.
+
 ### 5.8 الواجهة (`/ui/`)
 المشاريع، هوية العلامة، إنشاء الحملة، صفحة مراجعة الحملة (توليد التصاميم، اعتماد، تعديل، جدولة، المنصات)، التقويم، النشر (ربط الحسابات، النشر اليدوي، تعديل المواعيد). عربية RTL، ومظهر فاتح/داكن تلقائي.
 
@@ -200,6 +206,7 @@ failed → scheduled (إعادة محاولة)    scheduled/awaiting_manual/fail
 | النشر | `POST /content-items/{id}/schedule`، `GET /projects/{id}/publications`، `POST /publications/{id}/cancel/retry/reschedule/mark-published` |
 | Canva | `GET /canva/connect`, `/callback`, `/status`, `/brand-templates`, `/brand-templates/{id}/dataset` |
 | Meta | `GET /meta/status`, `/connect`, `/callback`, `/pending/{id}`, `/check-public-url`، `POST /meta/select`، `GET/DELETE /projects/{id}/social-connections` |
+| LinkedIn | `GET /linkedin/status`, `/connect`, `/callback`, `/pending/{id}`، `POST /linkedin/select` |
 
 التوثيق التفاعلي: `/docs`.
 
@@ -303,6 +310,7 @@ uvicorn app.main:app --port 8000   # الجداول تُنشأ تلقائيًا 
 | Autofill وتصدير Canva | لم يُجرَّب (لا قالب منشور) |
 | فيسبوك: ربط ونشر على صفحة Maeen | **جُرّب ونجح** مرة |
 | فيسبوك: إعادة الربط بعد تعطل التطبيق | **متوقف** عند تحديد الصفحة في موافقة Facebook (القسم 12) |
+| لينكدإن | **لم يُجرَّب** (يحتاج تطبيقًا ومنتجًا معتمدًا) |
 | إنستغرام | **لم يُجرَّب** (يحتاج حسابًا احترافيًا مربوطًا، صلاحيات، ورابطًا عامًا) |
 | تكييف النصوص بالذكاء الاصطناعي لمنصة أخرى | لم يُجرَّب بمفتاح حقيقي |
 | PostgreSQL | الـ migrations جُرّبت، والتشغيل الفعلي كان على SQLite |

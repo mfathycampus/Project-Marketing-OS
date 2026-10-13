@@ -14,16 +14,17 @@ class SocialConnection(Base, IdMixin, TimestampMixin):
     __table_args__ = (UniqueConstraint("project_id", "platform", name="uq_social_project_platform"),)
 
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"), index=True)
-    platform: Mapped[str] = mapped_column(String(30))  # facebook | instagram
+    platform: Mapped[str] = mapped_column(String(30))  # facebook | instagram | linkedin
     account_id: Mapped[str] = mapped_column(String(100))
     account_name: Mapped[str] = mapped_column(String(200), default="")
     token_enc: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="active")  # active | expired
-    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)  # Meta's message when it needed reconnecting
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)  # the platform's message when it needed reconnecting
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # LinkedIn tokens last ~60 days
 
 
 class MetaPending(Base, IdMixin):
-    """Pages returned right after login, waiting for the user to pick one. Tokens stay encrypted."""
+    """Accounts returned right after login (Meta Pages or LinkedIn organizations), waiting for the user to pick one. Tokens stay encrypted."""
 
     __tablename__ = "meta_pending"
 

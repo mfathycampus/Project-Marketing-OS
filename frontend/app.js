@@ -310,23 +310,32 @@ function CalendarDetail({ it, onClose, onChanged }) {
 function Connections({ pid, query }) {
   const [conns, reload] = useFetch(`/projects/${pid}/social-connections`);
   const [status] = useFetch("/meta/status");
+  const [li] = useFetch("/linkedin/status");
   const [pages, setPages] = useState(null);
+  const [orgs, setOrgs] = useState(null);
   useEffect(() => {
     if (query.meta_error) toastSetter("تعذّر الربط: " + query.meta_error);
+    if (query.li_error) toastSetter("تعذّر ربط لينكدإن: " + query.li_error);
+    if (query.pick_li) api(`/linkedin/pending/${query.pick_li}`).then(setOrgs).catch(() => {});
     if (query.connected) { toastSetter("تم ربط الحساب", true); reload(); }
     if (query.pick) api(`/meta/pending/${query.pick}`).then(setPages).catch(() => {});
-  }, [query.meta_error, query.connected, query.pick]);
+  }, [query.meta_error, query.li_error, query.pick_li, query.connected, query.pick]);
   const choose = async (page_id) => { await api("/meta/select", { method: "POST", body: { pending_id: query.pick, page_id } }); setPages(null); location.hash = `#/p/${pid}/publish`; reload(); };
-  const label = { facebook: "فيسبوك (صفحة)", instagram: "إنستغرام" };
+  const chooseOrg = async (org_id) => { await api("/linkedin/select", { method: "POST", body: { pending_id: query.pick_li, org_id } }); setOrgs(null); location.hash = `#/p/${pid}/publish`; reload(); };
+  const label = { facebook: "فيسبوك (صفحة)", instagram: "إنستغرام", linkedin: "لينكدإن (صفحة شركة)" };
   const byPlat = Object.fromEntries((conns || []).map((c) => [c.platform, c]));
   return html`<div class="card"><h2>ربط الحسابات</h2>
     ${status && !status.configured && html`<p class="muted">لم يُضبط تطبيق Meta بعد. أضف META_APP_ID و META_APP_SECRET في ملف .env (الدليل: docs/meta-setup-ar.md) ثم أعد تشغيل الخادم.</p>`}
-    <ul class="list">${["facebook", "instagram"].map((pl) => { const c = byPlat[pl]; return html`<li><span>${label[pl]}: ${c ? html`<strong>${c.account_name}</strong> ${c.status === "expired" ? html`<span class="badge s-rejected">يحتاج إعادة ربط</span> <span class="muted" style="font-size:13px">${c.last_error || ""}</span>` : html`<span class="badge s-approved">متصل</span>`}` : html`<span class="muted">غير متصل (النشر يدوي)</span>`}</span>
+    <ul class="list">${["facebook", "instagram", "linkedin"].map((pl) => { const c = byPlat[pl]; return html`<li><span>${label[pl]}: ${c ? html`<strong>${c.account_name}</strong> ${c.status === "expired" ? html`<span class="badge s-rejected">يحتاج إعادة ربط</span> <span class="muted" style="font-size:13px">${c.last_error || ""}</span>` : html`<span class="badge s-approved">متصل</span>${c.platform === "linkedin" && c.expires_at ? html` <span class="muted" style="font-size:13px">ينتهي ${new Date(c.expires_at).toLocaleDateString(LOC)}</span>` : ""}`}` : html`<span class="muted">غير متصل (النشر يدوي)</span>`}</span>
       ${c && html`<button class="danger" onClick=${async () => { await api(`/projects/${pid}/social-connections/${c.id}`, { method: "DELETE" }); reload(); }}>فصل</button>`}</li>`; })}</ul>
     ${byPlat.facebook && !byPlat.instagram && html`<p class="muted">إنستغرام غير متصل: تأكد أن لحساب إنستغرام (احترافي) ربطًا بصفحة فيسبوك، وأن صلاحيات إنستغرام مضافة في META_SCOPES، ثم أعد الربط.</p>`}
     ${status && status.configured && html`<p><a href=${`${API}/meta/connect?project_id=${pid}`}><button class="primary" type="button">${conns && conns.length ? "إعادة الربط بحساب Meta" : "ربط فيسبوك وإنستغرام"}</button></a></p>
       ${!status.public_base_url_set ? html`<p class="muted">لنشر إنستغرام تلقائيًا اضبط PUBLIC_BASE_URL (رابط عام للخادم). فيسبوك لا يحتاجه.</p>`
         : html`<p><button type="button" onClick=${async () => { const r = await api("/meta/check-public-url"); toastSetter(r.ok ? "الرابط العام يعمل" : "الرابط العام غير متاح: " + r.detail, r.ok); }}>فحص الرابط العام</button></p>`}`}
+    ${li && !li.configured && html`<p class="muted">لينكدإن: أضف LINKEDIN_CLIENT_ID و LINKEDIN_CLIENT_SECRET في .env (الدليل: docs/linkedin-setup-ar.md).</p>`}
+    ${li && li.configured && html`<p><a href=${`${API}/linkedin/connect?project_id=${pid}`}><button class="primary" type="button">${byPlat.linkedin ? "إعادة ربط لينكدإن" : "ربط صفحة لينكدإن"}</button></a></p>`}
+    ${orgs && html`<div class="modal"><div class="box"><h2>اختر صفحة الشركة</h2>
+      ${orgs.map((o) => html`<p><button style="width:100%;text-align:start" onClick=${() => chooseOrg(o.id)}>${o.name}</button></p>`)}</div></div>`}
     ${pages && html`<div class="modal"><div class="box"><h2>اختر الصفحة</h2>
       ${pages.map((p) => html`<p><button style="width:100%;text-align:start" onClick=${() => choose(p.id)}>${p.name}${p.instagram ? ` — إنستغرام: @${p.instagram}` : " — لا يوجد إنستغرام مرتبط"}</button></p>`)}</div></div>`}
   </div>`;
