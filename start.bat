@@ -3,8 +3,9 @@ rem One-click start for Windows: always uses backend\.venv, so pip and the serve
 setlocal
 cd /d "%~dp0"
 
-echo [1/5] Updating code (git pull)...
-git pull --ff-only || echo     (skipped - continuing with the current code)
+echo [1/5] Updating code...
+call "%~dp0update.bat" nopause
+cd /d "%~dp0"
 
 cd backend
 if not exist ".venv\Scripts\python.exe" (
