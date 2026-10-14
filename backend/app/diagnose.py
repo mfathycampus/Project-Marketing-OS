@@ -40,6 +40,10 @@ def main() -> None:
     print("META_REDIRECT_URI:", settings.meta_redirect_uri)
     print("PUBLIC_BASE_URL:", settings.public_base_url or "(not set)")
     print("DESIGN_PROVIDER:", settings.design_provider)
+    from app.designs.factory import health
+
+    for k, v in health().items():
+        print(f"  design.{k}: {v}")
     # Which variable NAMES each .env actually contains (values never printed): catches typos/extra spaces.
     for path in (_ROOT / ".env", _ROOT / "backend" / ".env"):
         if path.exists():

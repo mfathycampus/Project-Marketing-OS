@@ -28,7 +28,7 @@ button:disabled{opacity:.5;cursor:default}
 .ph{aspect-ratio:1/1;border-radius:10px;border:1px dashed var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);text-align:center;padding:8px}
 .item h3{font-size:16px;margin:10px 0 4px}.item p{margin:0 0 10px;color:var(--muted);font-size:14px;white-space:pre-wrap;max-height:4.8em;overflow:hidden}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
-.muted{color:var(--muted)}
+.muted{color:var(--muted)}.error{color:var(--bad)}
 .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
 .cal .h{text-align:center;color:var(--muted);font-size:13px}
 .day{min-height:90px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px;font-size:13px}

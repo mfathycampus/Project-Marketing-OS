@@ -23,6 +23,10 @@ def render_html(req: DesignRequest) -> str:
     return Template(raw).safe_substitute(ctx)
 
 
+class RendererUnavailable(RuntimeError):
+    """Playwright or its Chromium is not installed for the Python running the server."""
+
+
 def _launch(p):
     """Launch Chromium; fall back to any installed build when Playwright's pinned one is missing."""
     try:
@@ -32,7 +36,7 @@ def _launch(p):
         for pattern in ("chromium-*/chrome-linux*/chrome", "chromium/chrome-linux*/chrome", "chromium/chrome"):
             for exe in sorted(glob.glob(os.path.join(root, pattern)), reverse=True):
                 return p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-        raise RuntimeError(
+        raise RendererUnavailable(
             "متصفح Chromium غير مثبت لـ playwright. نفّذ: python -m playwright install chromium ثم أعد المحاولة "
             f"({str(first).splitlines()[0][:120]})") from first
 
@@ -44,7 +48,7 @@ class HtmlRenderer:
         try:
             from playwright.sync_api import sync_playwright
         except ImportError as exc:
-            raise RuntimeError(
+            raise RendererUnavailable(
                 "حزمة playwright غير مثبتة في بيئة Python التي تشغّل الخادم. نفّذ: "
                 "python -m pip install playwright ثم python -m playwright install chromium، وأعد تشغيل الخادم") from exc
 

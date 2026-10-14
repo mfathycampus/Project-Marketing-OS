@@ -245,3 +245,67 @@ def test_renderer_explains_missing_chromium(monkeypatch):
     monkeypatch.setattr(html_renderer.glob, "glob", lambda *a, **k: [])
     with pytest.raises(RuntimeError, match="Chromium"):
         html_renderer._launch(type("P", (), {"chromium": Chromium()})())
+
+
+def _png_size(data):
+    from PIL import Image
+    import io
+
+    return Image.open(io.BytesIO(data)).size
+
+
+@pytest.mark.parametrize("key,size", [("offer_square", (1080, 1080)), ("quote_square", (1080, 1080)),
+                                      ("announcement_story", (1080, 1920))])
+def test_pillow_renderer_needs_no_browser(monkeypatch, key, size):
+    import sys
+
+    from app.designs.pillow_renderer import PillowRenderer
+
+    monkeypatch.setitem(sys.modules, "playwright", None)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", None)
+    vals = {"headline": "خصم 30% على جميع الوجبات هذا الأسبوع فقط " * 2, "price": "49 ريال",
+            "description": "اطلب الآن عبر Maeen App " * 5, "cta": "اطلب الآن"}
+    res = PillowRenderer().render(DesignRequest(key, vals, brand_name="مطاعم المذاق", primary_color="not-a-color"))
+    assert res.png.startswith(b"\x89PNG") and _png_size(res.png) == size == (res.width, res.height)
+
+
+def test_pillow_renderer_without_raqm_uses_reshaper(monkeypatch):
+    from app.designs import pillow_renderer
+
+    monkeypatch.setattr(pillow_renderer, "HAS_RAQM", False)
+    text, kw = pillow_renderer._shape("مرحبا", rtl=True)
+    assert kw == {} and text != "مرحبا"  # reshaped into presentation forms + visual order
+    res = pillow_renderer.PillowRenderer().render(DesignRequest("offer_square", {"headline": "مرحبا", "cta": "اطلب"}))
+    assert res.png.startswith(b"\x89PNG")
+
+
+def test_auto_renderer_falls_back_to_pillow_when_playwright_missing(monkeypatch):
+    import sys
+
+    from app.designs import factory
+
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", None)
+    monkeypatch.setattr(factory.AutoRenderer, "chromium_ok", None)
+    monkeypatch.setattr(factory.settings, "design_provider", "html")  # old .env value still gets the fallback
+    provider = factory.get_design_provider()
+    res = provider.render(DesignRequest("offer_square", {"headline": "h", "cta": "c"}))
+    assert res.png.startswith(b"\x89PNG")
+    assert factory.AutoRenderer.chromium_ok is False and "playwright" in factory.AutoRenderer.last_error
+
+
+def test_auto_renderer_survives_one_off_chromium_crash(monkeypatch):
+    from app.designs import factory
+
+    def boom(self, req):
+        raise RuntimeError("Target page, context or browser has been closed")
+
+    monkeypatch.setattr(factory.HtmlRenderer, "render", boom)
+    monkeypatch.setattr(factory.AutoRenderer, "chromium_ok", None)
+    res = factory.AutoRenderer().render(DesignRequest("quote_square", {"headline": "h"}))
+    assert res.png.startswith(b"\x89PNG") and factory.AutoRenderer.chromium_ok is None
+
+
+def test_designs_health_endpoint(client):
+    body = client.get("/api/v1/designs/health").json()
+    assert body["pillow_ready"] is True and body["python"]
+    assert body["arabic_shaping"] in ("raqm", "arabic-reshaper")

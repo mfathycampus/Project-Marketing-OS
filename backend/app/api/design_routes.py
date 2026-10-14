@@ -43,6 +43,11 @@ def generate_design(item_id: uuid.UUID, session: Session = Depends(get_session),
             "image_url": f"/api/v1/content-items/{item_id}/design/image", "external_url": asset.external_url}
 
 
+@router.get("/designs/health")
+def designs_health():
+    return factory.health()
+
+
 @router.get("/content-items/{item_id}/design/image")
 def design_image(item_id: uuid.UUID, format: str | None = None, session: Session = Depends(get_session)):
     if session.get(ContentItem, item_id) is None:

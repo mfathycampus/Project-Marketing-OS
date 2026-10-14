@@ -1,3 +1,5 @@
+import logging
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -19,6 +21,7 @@ from app.migrate import auto_migrate_if_sqlite
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     auto_migrate_if_sqlite()
+    logging.getLogger("uvicorn.error").info("Python: %s | design provider: %s", sys.executable, settings.design_provider)
     workers = [DesignWorker(), PublishingWorker()] if settings.worker_enabled else []
     for w in workers:
         w.start()

@@ -29,6 +29,15 @@ async function api(path, opts = {}) {
   return res.status === 204 ? null : res.json();
 }
 
+function DesignEngine({ tick }) {
+  const [h] = useFetch("/designs/health", [tick]);
+  if (!h || h.provider === "canva") return null;
+  if (!h.pillow_ready && h.chromium_ok === false)
+    return html`<p class="error">محرك التصميم غير جاهز على هذا الجهاز: ${h.arabic_shaping === "missing" ? "حزم العربية ناقصة (شغّل start.bat مرة واحدة)" : "لا يوجد خط عربي"}.</p>`;
+  const engine = h.provider === "pillow" || h.chromium_ok === false ? "المحرك المدمج (بدون متصفح)" : h.chromium_ok ? "Chromium" : "تلقائي (Chromium أو المحرك المدمج)";
+  return html`<p class="muted">محرك التصميم: ${engine}</p>`;
+}
+
 function useFetch(path, deps = []) {
   const [data, setData] = useState(null);
   const [tick, setTick] = useState(0);
@@ -242,6 +251,7 @@ function CampaignPage({ pid, cid }) {
     <h1>${c.name}</h1>
     <div class="card"><p>${c.strategy}</p>
       <p class="muted">${Object.entries(counts).map(([k, v]) => `${STATUS[k]}: ${v}`).join(" · ")}</p>
+      <${DesignEngine} tick=${pending} />
       <div class="actions">
         <button disabled=${busy || !needDesign} onClick=${() => run(`/projects/${pid}/campaigns/${cid}/designs`)}>توليد كل التصاميم (${needDesign})</button>
         <button class="primary" disabled=${busy || !reviewable} onClick=${() => run(`/projects/${pid}/campaigns/${cid}/approve-all`)}>اعتماد الكل (${reviewable})</button>

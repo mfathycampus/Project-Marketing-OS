@@ -2,6 +2,9 @@
 
 Multi-project marketing content platform: Claude (strategy/copy) → design provider → approval → calendar → publishing.
 
+## Run on Windows
+Double-click `start.bat` (pulls, uses `backend\.venv`, installs deps, restarts the server on :8000).
+
 ## Run (backend)
 ```
 # local quick start uses sqlite; for Postgres: docker compose up -d db

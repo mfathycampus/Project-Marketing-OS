@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
 
     storage_dir: str = "./var/storage"
-    design_provider: str = "html"  # html | canva
+    design_provider: str = "auto"  # auto (Chromium, falls back to Pillow) | html (same as auto) | pillow | canva
     encryption_key: str = ""  # Fernet key, required for Canva token storage
     canva_client_id: str = ""
     canva_client_secret: str = ""
