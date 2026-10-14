@@ -35,7 +35,7 @@ function DesignEngine({ tick }) {
   if (!h.pillow_ready && h.chromium_ok === false)
     return html`<p class="error">محرك التصميم غير جاهز على هذا الجهاز: ${h.arabic_shaping === "missing" ? "حزم العربية ناقصة (شغّل start.bat مرة واحدة)" : "لا يوجد خط عربي"}.</p>`;
   const engine = h.provider === "pillow" || h.chromium_ok === false ? "المحرك المدمج (بدون متصفح)" : h.chromium_ok ? "Chromium" : "تلقائي (Chromium أو المحرك المدمج)";
-  return html`<p class="muted">محرك التصميم: ${engine} · صوت الفيديو: ${h.voice ? h.voice : "غير مفعّل (شغّل set-azure.bat)"}</p>`;
+  return html`<p class="muted">محرك التصميم: ${engine} · صوت الفيديو: ${h.voice ? h.voice : "غير مفعّل (شغّل set-azure.bat)"} · لقطات الخلفية: ${h.footage ? "Pexels" : "غير مفعّلة (شغّل set-pexels.bat)"}</p>`;
 }
 
 function useFetch(path, deps = []) {
@@ -216,10 +216,15 @@ function VariantRow({ v, locked, onSave, onDelete }) {
 }
 
 function EditModal({ it, onClose, onSaved }) {
-  const [f, setF] = useState({ headline: it.headline, caption: it.caption, cta: it.cta, planned_date: it.planned_date || "" });
+  const isVideo = it.media_type === "video";
+  const lines = (k) => ((it.design || {})[k] || []).join("\n");
+  const [f, setF] = useState({ headline: it.headline, caption: it.caption, cta: it.cta, planned_date: it.planned_date || "",
+    video_scenes: lines("video_scenes"), video_broll: lines("video_broll") });
   const save = async (e) => {
     e.preventDefault();
-    const body = { ...f, planned_date: f.planned_date || null };
+    const split = (t) => t.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 6);
+    const body = { ...f, planned_date: f.planned_date || null, video_scenes: split(f.video_scenes), video_broll: split(f.video_broll) };
+    if (!isVideo) { delete body.video_scenes; delete body.video_broll; }
     await api(`/content-items/${it.id}`, { method: "PATCH", body });
     onSaved();
   };
@@ -229,6 +234,8 @@ function EditModal({ it, onClose, onSaved }) {
     <p><label>النص</label><textarea value=${f.caption} onInput=${(e) => setF({ ...f, caption: e.target.value })}></textarea></p>
     <p><label>زر الدعوة</label><input maxlength="100" value=${f.cta} onInput=${(e) => setF({ ...f, cta: e.target.value })} /></p>
     <p><label>تاريخ النشر</label><input type="date" value=${f.planned_date} onInput=${(e) => setF({ ...f, planned_date: e.target.value })} /></p>
+    ${isVideo && html`<p><label>مشاهد الفيديو (سطر لكل مشهد، حتى 6)</label><textarea rows="4" value=${f.video_scenes} onInput=${(e) => setF({ ...f, video_scenes: e.target.value })}></textarea></p>
+      <p><label>لقطات الخلفية: كلمات بحث إنجليزية (سطر لكل مشهد، مثل: woman typing laptop office)</label><textarea rows="4" dir="ltr" value=${f.video_broll} onInput=${(e) => setF({ ...f, video_broll: e.target.value })}></textarea></p>`}
     <p class="muted">بعد التعديل أعد توليد التصميم ليظهر النص الجديد عليه.</p>
     <div class="actions"><button class="primary">حفظ</button><button type="button" onClick=${onClose}>إلغاء</button></div>
   </form></div>`;

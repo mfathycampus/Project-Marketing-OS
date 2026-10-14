@@ -218,9 +218,14 @@ def patch_item(item_id: uuid.UUID, body: s.ContentPatch, session: Session = Depe
     item = _item(session, item_id)
     if item.status in (ContentStatus.APPROVED.value, ContentStatus.ARCHIVED.value):
         raise HTTPException(409, "approved or archived content cannot be edited")
-    for k, v in body.model_dump(exclude_unset=True).items():
+    changes = body.model_dump(exclude_unset=True)
+    design_keys = {k: changes.pop(k) for k in ("video_scenes", "video_broll") if k in changes}
+    for k, v in changes.items():
         if v is not None:
             setattr(item, k, v)
+    if design_keys:  # reassign: JSON columns only persist a new dict
+        item.design = {**item.design, **{k: [x.strip()[:90] for x in (v or []) if x.strip()]
+                                         for k, v in design_keys.items()}}
     session.commit()
     return item
 

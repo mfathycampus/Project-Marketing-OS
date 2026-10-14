@@ -32,6 +32,10 @@ class DesignSpec(BaseModel):
         default_factory=list,
         description="Only when media_type is video: 3-5 short on-screen lines (max 70 chars each) telling the "
                     "story in order, starting with a strong hook. Do not repeat the cta; it is added as the last scene.")
+    video_broll: list[str] = Field(
+        default_factory=list,
+        description="Only when media_type is video: one ENGLISH stock-footage search term (2-4 concrete visual words, "
+                    "e.g. 'woman typing laptop office') per video scene, same order as video_scenes.")
 
     @field_validator("fields", mode="before")
     @classmethod

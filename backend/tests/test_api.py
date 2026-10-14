@@ -83,7 +83,7 @@ def test_ai_run_recorded_and_transition_api(client, fake_llm, session):
     fake_llm.responses.append(campaign_payload())
     body = client.post(f"/api/v1/projects/{pid}/campaigns", json=REQ).json()
     run = session.query(AIRun).one()
-    assert run.status == "ok" and run.prompt_version == "campaign.v2"
+    assert run.status == "ok" and run.prompt_version == "campaign.v3"
     item = body["items"][0]["id"]
     assert client.post(f"/api/v1/content-items/{item}/transition", params={"to": "approved"}).status_code == 409
     assert client.post(f"/api/v1/content-items/{item}/transition", params={"to": "design_pending"}).status_code == 200

@@ -10,13 +10,13 @@ import os
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter
 
 from app.designs.pillow_renderer import DARK, INK, Block, _Canvas, _gradient, _rgb
-from app.video import voice
+from app.video import broll, voice
 
 FPS = 30
 VOICE_LEAD = 0.3  # narration starts shortly after the scene text begins to appear
@@ -41,6 +41,7 @@ class VideoRequest:
     rtl: bool = True
     music_seed: str = ""
     voice: str = ""  # Azure voice name (e.g. ar-SA-HamedNeural); empty = no narration
+    broll: list[str] = field(default_factory=list)  # Pexels search term per scene; empty = brand gradient
 
 
 @dataclass
@@ -92,6 +93,33 @@ def _scene_seconds(text: str) -> float:
     return max(2.6, min(5.0, 1.8 + 0.05 * len(text)))
 
 
+class _ClipReader:
+    """Decodes a footage file into frames of exactly w x h at FPS (cover-crop, looped if too short)."""
+
+    def __init__(self, path: Path, w: int, h: int, seconds: float):
+        self.size = (w, h)
+        self.nbytes = w * h * 3
+        self.proc = subprocess.Popen(
+            [ffmpeg_exe(), "-v", "error", "-stream_loop", "-1", "-i", str(path), "-t", f"{seconds + 0.5:.3f}", "-an",
+             "-vf", f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={FPS}",
+             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.last: Image.Image | None = None
+
+    def next(self) -> Image.Image | None:
+        data = self.proc.stdout.read(self.nbytes)
+        if len(data) == self.nbytes:
+            self.last = Image.frombytes("RGB", self.size, data)
+        return self.last  # clip ended early: hold the last frame (None if it never produced one)
+
+    def close(self) -> None:
+        try:
+            self.proc.stdout.close()
+        finally:
+            self.proc.kill()
+            self.proc.wait()
+
+
 class VideoRenderer:
     name = "video"
 
@@ -102,6 +130,8 @@ class VideoRenderer:
         margin = 90
 
         bg = _gradient(w, h, primary, dark, diagonal=False)
+        shade = bg.convert("RGBA")  # brand-tinted darkening over footage keeps the text readable
+        shade.putalpha(165)
         glow = self._glow(int(w * 0.9), secondary)
         brand = self._layer(w, Block(req.brand_name, 44, alpha=0.85), req.rtl, margin) if req.brand_name else None
 
@@ -152,14 +182,25 @@ class VideoRenderer:
                 start = 0.0
                 frame_no = 0
                 for idx, (layer, dur, is_cta) in enumerate(layers):
-                    for f in range(int(round(dur * FPS))):
-                        if frame_no >= n_frames:
-                            break
-                        t = f / FPS
-                        frame = self._frame(bg, glow, brand, layer, t, dur, (start + t) / total, is_cta,
-                                            secondary, w, h, margin, last=idx == len(layers) - 1)
-                        proc.stdin.write(frame.tobytes())
-                        frame_no += 1
+                    path = self._footage(req, idx, w, h, dur)
+                    reader = _ClipReader(path, w, h, dur) if path else None
+                    try:
+                        for f in range(int(round(dur * FPS))):
+                            if frame_no >= n_frames:
+                                break
+                            t = f / FPS
+                            base = bg
+                            if reader is not None:
+                                shot = reader.next()
+                                if shot is not None:
+                                    base = Image.alpha_composite(shot.convert("RGBA"), shade)
+                            frame = self._frame(base, glow, brand, layer, t, dur, (start + t) / total, is_cta,
+                                                secondary, w, h, margin, last=idx == len(layers) - 1)
+                            proc.stdin.write(frame.tobytes())
+                            frame_no += 1
+                    finally:
+                        if reader is not None:
+                            reader.close()
                     start += dur
                 proc.stdin.close()
             except BrokenPipeError:
@@ -169,6 +210,13 @@ class VideoRenderer:
                 raise VideoError(f"فشل ترميز الفيديو: {err.strip()[-400:]}")
             data = out.read_bytes()
         return VideoResult(mp4=data, width=w, height=h, duration_ms=int(total * 1000))
+
+    @staticmethod
+    def _footage(req: VideoRequest, idx: int, w: int, h: int, dur: float) -> Path | None:
+        if not req.broll:
+            return None
+        query = req.broll[idx] if idx < len(req.broll) else req.broll[-1]
+        return broll.fetch(query, w, h, dur, req.music_seed or "|".join(req.scenes))
 
     @staticmethod
     def _voice_clips(req: VideoRequest) -> list[tuple[bytes, float]]:
@@ -190,8 +238,12 @@ class VideoRenderer:
         while max_h and c.height(block, scale) > max_h and scale > 0.4:
             scale *= 0.92
         hh = max(1, c.height(block, scale)) + 20
-        img = Image.new("RGBA", (w, hh), (0, 0, 0, 0))
-        _Canvas(img, rtl, margin, w - margin).paint(block, 10, scale)
+        img = Image.new("RGBA", (w, hh + 40), (0, 0, 0, 0))
+        _Canvas(img, rtl, margin, w - margin).paint(block, 20, scale)
+        if block.pill is None:  # soft shadow keeps text readable over bright footage
+            shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            shadow.putalpha(img.getchannel("A").point(lambda v: int(v * 0.55)).filter(ImageFilter.GaussianBlur(10)))
+            img = Image.alpha_composite(shadow, img)
         box = img.getbbox()
         return img.crop(box) if box else img
 

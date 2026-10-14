@@ -73,6 +73,7 @@ def health() -> dict:
         "font_bold": info["font_bold"],
         "ffmpeg": _ffmpeg(),
         "voice": settings.tts_voice if _voice_on() else None,
+        "footage": bool(settings.pexels_api_key),
     }
 
 

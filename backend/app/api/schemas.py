@@ -119,6 +119,8 @@ class ContentPatch(BaseModel):
     cta: str | None = Field(default=None, max_length=100)
     planned_date: date | None = None
     media_type: Literal["image", "video"] | None = None
+    video_scenes: list[str] | None = Field(default=None, max_length=6)  # on-screen lines (stored in design)
+    video_broll: list[str] | None = Field(default=None, max_length=6)  # English Pexels search terms per scene
 
 
 class RejectIn(BaseModel):

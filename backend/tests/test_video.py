@@ -244,3 +244,76 @@ def test_service_passes_voice_only_when_configured(monkeypatch):
     monkeypatch.setattr(settings, "azure_speech_key", "K")
     monkeypatch.setattr(settings, "azure_speech_region", "eastus")
     assert DesignService._video_request(item, {"headline": "ع"}, DesignRequest("offer_square", {})).voice == settings.tts_voice
+
+
+# ---------- Pexels footage ----------
+PEXELS_RESULT = {"videos": [
+    {"id": 1, "duration": 3, "url": "https://pexels.com/v/1", "user": {"name": "A"}, "video_files": [
+        {"id": 11, "file_type": "video/mp4", "width": 1080, "height": 1920, "link": "https://cdn/short.mp4"}]},
+    {"id": 2, "duration": 12, "url": "https://pexels.com/v/2", "user": {"name": "B"}, "video_files": [
+        {"id": 21, "file_type": "video/mp4", "width": 1920, "height": 1080, "link": "https://cdn/landscape.mp4"},
+        {"id": 22, "file_type": "video/mp4", "width": 2160, "height": 3840, "link": "https://cdn/4k.mp4"},
+        {"id": 23, "file_type": "video/mp4", "width": 720, "height": 1280, "link": "https://cdn/hd.mp4"}]},
+]}
+
+
+def test_pexels_picks_long_enough_portrait_file_and_caches(monkeypatch, tmp_path):
+    from app.video import broll
+
+    monkeypatch.setattr(settings, "pexels_api_key", "PK")
+    calls = []
+
+    def handler(req: httpx.Request):
+        calls.append(str(req.url))
+        if req.url.host == "api.pexels.com":
+            assert req.headers["authorization"] == "PK" and req.url.params["orientation"] == "portrait"
+            return httpx.Response(200, json=PEXELS_RESULT)
+        return httpx.Response(200, content=b"MP4BYTES")
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    store = LocalStorage(str(tmp_path))
+    path = broll.fetch("woman office laptop", 1080, 1920, 4.0, "seed", http, store)
+    # video 1 is too short; of video 2 the smallest portrait file that covers ~2/3 of 1080x1920 is 720x1280
+    assert path.read_bytes() == b"MP4BYTES" and path.name == "pexels-2-23.mp4"
+    assert calls[-1] == "https://cdn/hd.mp4"
+    n = len(calls)
+    assert broll.fetch("woman office laptop", 1080, 1920, 4.0, "seed", http, store) == path
+    assert len([c for c in calls[n:] if "cdn" in c]) == 0  # cached: no second download
+
+
+def test_pexels_failures_fall_back_to_gradient(monkeypatch, tmp_path):
+    from app.video import broll
+
+    store = LocalStorage(str(tmp_path))
+    monkeypatch.setattr(settings, "pexels_api_key", "")
+    assert broll.fetch("x", 1080, 1920, 3, "s", storage=store) is None  # no key
+    monkeypatch.setattr(settings, "pexels_api_key", "PK")
+    for resp in (httpx.Response(401), httpx.Response(200, json={"videos": []}), httpx.Response(500)):
+        http = httpx.Client(transport=httpx.MockTransport(lambda r, resp=resp: resp))
+        assert broll.fetch("x", 1080, 1920, 3, "s", http, store) is None
+
+
+def test_footage_is_drawn_behind_the_text(monkeypatch, tmp_path):
+    import subprocess
+
+    from app.video import broll
+
+    clip = tmp_path / "red.mp4"
+    subprocess.run([renderer.ffmpeg_exe(), "-v", "error", "-f", "lavfi", "-i", "color=c=red:s=360x640:d=1",
+                    str(clip)], check=True)
+    monkeypatch.setattr(broll, "fetch", lambda *a, **k: clip)
+    res = renderer.VideoRenderer().render(renderer.VideoRequest(["أ"], broll=["red"], primary_color="#0000ff"))
+    frame = subprocess.run([renderer.ffmpeg_exe(), "-v", "error", "-i", "-", "-vframes", "1", "-f", "rawvideo",
+                            "-pix_fmt", "rgb24", "-"], input=res.mp4, capture_output=True).stdout
+    r, g, b = frame[(100 * 1080 + 100) * 3:(100 * 1080 + 100) * 3 + 3]
+    assert r > 40 and r > g  # red footage shows through the brand-tinted shade
+
+
+def test_edit_video_scenes_and_search_terms(client, fake_llm):
+    pid = make_project(client)
+    fake_llm.responses.append(campaign_payload())
+    item_id = client.post(f"/api/v1/projects/{pid}/campaigns", json=REQ).json()["items"][0]["id"]
+    body = client.patch(f"/api/v1/content-items/{item_id}", json={
+        "media_type": "video", "video_scenes": [" مشهد ١ ", "", "مشهد ٢"], "video_broll": ["office laptop"]}).json()
+    assert body["design"]["video_scenes"] == ["مشهد ١", "مشهد ٢"] and body["design"]["video_broll"] == ["office laptop"]
+    assert body["design"]["template_key"]  # rest of the design kept
