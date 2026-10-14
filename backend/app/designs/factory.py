@@ -73,8 +73,14 @@ def health() -> dict:
         "font_bold": info["font_bold"],
         "ffmpeg": _ffmpeg(),
         "voice": settings.tts_voice if _voice_on() else None,
-        "footage": bool(settings.pexels_api_key),
+        "footage": _footage(),
     }
+
+
+def _footage() -> str | None:
+    from app.video import broll
+
+    return broll.provider_name()
 
 
 def _voice_on() -> bool:

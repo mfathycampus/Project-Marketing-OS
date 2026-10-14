@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     tts_voice: str = "ar-SA-HamedNeural"  # ar-SA-ZariyahNeural, ar-AE-FatimaNeural, ar-AE-HamdanNeural, ar-KW-FahedNeural ...
     tts_rate: str = "+0%"  # speaking speed, e.g. +10%
     pexels_api_key: str = ""  # free key from pexels.com/api -> real footage behind video scenes
+    pixabay_api_key: str = ""  # alternative footage source (free key: pixabay.com/api/docs) when Pexels is unavailable
     public_base_url: str = ""  # optional; without it Instagram images are hosted via the linked Facebook Page
     publish_provider: str = "manual"  # manual | dryrun (real platform providers plug in here)
     publish_poll_interval_s: float = 5.0
@@ -66,7 +67,7 @@ class Settings(BaseSettings):
                 return prefix + (_BACKEND / path).as_posix()
         return v
 
-    @field_validator("encryption_key", "canva_client_id", "canva_client_secret", "anthropic_api_key", "meta_app_id", "meta_app_secret", "linkedin_client_id", "linkedin_client_secret", "azure_speech_key", "pexels_api_key", mode="before")
+    @field_validator("encryption_key", "canva_client_id", "canva_client_secret", "anthropic_api_key", "meta_app_id", "meta_app_secret", "linkedin_client_id", "linkedin_client_secret", "azure_speech_key", "pexels_api_key", "pixabay_api_key", mode="before")
     @classmethod
     def _clean_secret(cls, v):
         """Tolerate quotes, stray whitespace and inline '# comments' pasted into .env."""

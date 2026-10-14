@@ -35,7 +35,7 @@ function DesignEngine({ tick }) {
   if (!h.pillow_ready && h.chromium_ok === false)
     return html`<p class="error">محرك التصميم غير جاهز على هذا الجهاز: ${h.arabic_shaping === "missing" ? "حزم العربية ناقصة (شغّل start.bat مرة واحدة)" : "لا يوجد خط عربي"}.</p>`;
   const engine = h.provider === "pillow" || h.chromium_ok === false ? "المحرك المدمج (بدون متصفح)" : h.chromium_ok ? "Chromium" : "تلقائي (Chromium أو المحرك المدمج)";
-  return html`<p class="muted">محرك التصميم: ${engine} · صوت الفيديو: ${h.voice ? h.voice : "غير مفعّل (شغّل set-azure.bat)"} · لقطات الخلفية: ${h.footage ? "Pexels" : "غير مفعّلة (شغّل set-pexels.bat)"}</p>`;
+  return html`<p class="muted">محرك التصميم: ${engine} · صوت الفيديو: ${h.voice ? h.voice : "غير مفعّل (شغّل set-azure.bat)"} · لقطات الخلفية: ${h.footage || "غير مفعّلة (شغّل set-pixabay.bat)"}</p>`;
 }
 
 function useFetch(path, deps = []) {

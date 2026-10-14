@@ -317,3 +317,34 @@ def test_edit_video_scenes_and_search_terms(client, fake_llm):
         "media_type": "video", "video_scenes": [" مشهد ١ ", "", "مشهد ٢"], "video_broll": ["office laptop"]}).json()
     assert body["design"]["video_scenes"] == ["مشهد ١", "مشهد ٢"] and body["design"]["video_broll"] == ["office laptop"]
     assert body["design"]["template_key"]  # rest of the design kept
+
+
+PIXABAY_RESULT = {"hits": [
+    {"id": 7, "duration": 2, "videos": {"large": {"url": "https://px/short.mp4", "width": 1920, "height": 1080}}},
+    {"id": 8, "duration": 15, "pageURL": "https://pixabay.com/v/8", "user": "U", "videos": {
+        "large": {"url": "https://px/8-large.mp4", "width": 3840, "height": 2160},
+        "medium": {"url": "https://px/8-medium.mp4", "width": 1920, "height": 1080},
+        "small": {"url": "https://px/8-small.mp4", "width": 1280, "height": 720},
+        "tiny": {"url": "", "width": 0, "height": 0}}},
+]}
+
+
+def test_pixabay_is_used_when_pexels_has_no_key(monkeypatch, tmp_path):
+    from app.video import broll
+
+    monkeypatch.setattr(settings, "pexels_api_key", "")
+    monkeypatch.setattr(settings, "pixabay_api_key", "PB")
+    seen = []
+
+    def handler(req: httpx.Request):
+        seen.append(str(req.url))
+        if req.url.host == "pixabay.com":
+            assert req.url.params["key"] == "PB" and req.url.params["q"] == "office laptop"
+            return httpx.Response(200, json=PIXABAY_RESULT)
+        return httpx.Response(200, content=b"PXB")
+
+    path = broll.fetch("office laptop", 1080, 1920, 4.0, "s", httpx.Client(transport=httpx.MockTransport(handler)),
+                       LocalStorage(str(tmp_path)))
+    # short clip skipped; 1080p chosen over 4K (too heavy) and 720p (too small once cropped to vertical)
+    assert path.name == "pixabay-8-medium.mp4" and seen[-1] == "https://px/8-medium.mp4"
+    assert broll.provider_name() == "Pixabay"
