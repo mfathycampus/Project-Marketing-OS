@@ -71,4 +71,14 @@ def health() -> dict:
         "arabic_shaping": "raqm" if info["raqm"] else ("arabic-reshaper" if shaping_ok else "missing"),
         "font_regular": info["font_regular"],
         "font_bold": info["font_bold"],
+        "ffmpeg": _ffmpeg(),
     }
+
+
+def _ffmpeg() -> str | None:
+    from app.video.renderer import VideoError, ffmpeg_exe
+
+    try:
+        return ffmpeg_exe()
+    except VideoError:
+        return None

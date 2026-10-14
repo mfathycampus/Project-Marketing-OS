@@ -1,3 +1,4 @@
+from typing import Literal
 import uuid
 from datetime import date, datetime
 
@@ -89,6 +90,7 @@ class ContentItemApi(ORM):
     caption: str
     cta: str
     design: dict
+    media_type: str = "image"
     status: str
     variants: list[VariantApi] = []
 
@@ -116,6 +118,7 @@ class ContentPatch(BaseModel):
     caption: str | None = None
     cta: str | None = Field(default=None, max_length=100)
     planned_date: date | None = None
+    media_type: Literal["image", "video"] | None = None
 
 
 class RejectIn(BaseModel):

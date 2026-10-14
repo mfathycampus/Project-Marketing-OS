@@ -28,6 +28,10 @@ class DesignSpec(BaseModel):
 
     template_key: str = Field(description="One of the allowed template keys")
     fields: DesignFields = Field(default_factory=DesignFields)
+    video_scenes: list[str] = Field(
+        default_factory=list,
+        description="Only when media_type is video: 3-5 short on-screen lines (max 70 chars each) telling the "
+                    "story in order, starting with a strong hook. Do not repeat the cta; it is added as the last scene.")
 
     @field_validator("fields", mode="before")
     @classmethod
@@ -42,6 +46,8 @@ class ContentItemOut(BaseModel):
     headline: str = Field(max_length=HEADLINE_MAX)
     caption: str
     cta: str = Field(max_length=100)
+    media_type: Literal["image", "video"] = Field(
+        default="image", description="video = short vertical reel (Reels/TikTok/Shorts); image = single designed post")
     design: DesignSpec
 
     @model_validator(mode="after")
@@ -59,6 +65,10 @@ class CampaignOut(BaseModel):
     content_items: list[ContentItemOut] = Field(min_length=1)
 
 
+VIDEO_SCENE_MAX = 70
+VIDEO_SCENES_MAX = 6
+
+
 class CampaignRequest(BaseModel):
     objective: str = Field(examples=["increase_orders"])
     duration_days: int = Field(default=7, ge=1, le=60)
@@ -67,6 +77,7 @@ class CampaignRequest(BaseModel):
     tone: str | None = None
     start_date: date | None = None  # defaults to today
     brief: str = ""  # free-text from the user, e.g. "weekend offer targeting families in Riyadh"
+    video_count: int = Field(default=0, ge=0, le=30, description="How many of the posts should be short videos")
 
 
 class AdaptedCaption(BaseModel):

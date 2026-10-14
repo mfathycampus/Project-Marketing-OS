@@ -19,6 +19,7 @@ class PublishPayload:
     image: bytes | None = None
     item_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
+    video: bytes | None = None  # set for media_type "video"; image is then the cover
 
 
 @dataclass
@@ -38,6 +39,7 @@ class ManualProvider:
     """No API access: at the scheduled time the post is queued for a person to publish by hand."""
 
     name = "manual"
+    supports_video = True
 
     def publish(self, payload: PublishPayload) -> PublishResult:
         return PublishResult(status="awaiting_manual")
@@ -47,6 +49,7 @@ class DryRunProvider:
     """Pretends to publish. For demos and tests."""
 
     name = "dryrun"
+    supports_video = True
 
     def publish(self, payload: PublishPayload) -> PublishResult:
         return PublishResult(status="published", external_id=f"dryrun-{uuid.uuid4().hex[:8]}")

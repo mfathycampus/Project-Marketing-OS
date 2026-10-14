@@ -35,6 +35,20 @@ class DesignAsset(Base, IdMixin, TimestampMixin):
     external_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)  # e.g. Canva edit link
 
 
+class VideoAsset(Base, IdMixin, TimestampMixin):
+    """Short video for an item whose media_type is "video". The item's DesignAsset is its cover image."""
+
+    __tablename__ = "video_assets"
+
+    content_item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("content_items.id"), index=True)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("design_jobs.id"))
+    storage_key: Mapped[str] = mapped_column(String(300))
+    mime_type: Mapped[str] = mapped_column(String(50), default="video/mp4")
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    duration_ms: Mapped[int] = mapped_column(Integer)
+
+
 class CanvaConnection(Base, IdMixin, TimestampMixin):
     __tablename__ = "canva_connections"
 

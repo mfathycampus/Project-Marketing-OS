@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.ai.context import build_campaign_context
 from app.ai.provider import LLMProvider, LLMRequest, LLMResult
-from app.ai.schemas import CAPTION_LIMITS, AdaptOut, CampaignOut, CampaignRequest
+from app.ai.schemas import (CAPTION_LIMITS, VIDEO_SCENE_MAX, VIDEO_SCENES_MAX, AdaptOut, CampaignOut,
+                            CampaignRequest)
 from app.models import AIRun, Campaign, ContentItem, ContentVariant, Project
 
 PROMPTS = Path(__file__).parent / "prompts"
@@ -35,13 +36,14 @@ class AIOrchestrator:
         if project is None:
             raise LookupError("project not found")
 
-        instructions, prompt_version = _load_prompt("campaign.v1")
+        instructions, prompt_version = _load_prompt("campaign.v2")
         ctx = build_campaign_context(self.session, project, req.brief)
         forbidden = [r.text.lower() for r in project.rules if r.kind == "forbidden_word"]
         user_message = (
             f"{ctx.volatile}\n\n<request>\n"
             f"objective: {req.objective}\nduration_days: {req.duration_days}\n"
-            f"post_count: {req.post_count}\nplatforms: {', '.join(req.platforms)}\n"
+            f"post_count: {req.post_count}\nvideo_count: {min(req.video_count, req.post_count)}\n"
+            f"platforms: {', '.join(req.platforms)}\n"
             f"tone: {req.tone or 'per brand'}\nbrief: {req.brief}\n"
             f"allowed_template_keys: {', '.join(ALLOWED_TEMPLATES)}\n</request>"
         )
@@ -79,6 +81,7 @@ class AIOrchestrator:
                     caption=item.caption,
                     cta=item.cta,
                     design=item.design.model_dump(),
+                    media_type=item.media_type,
                 )
             )
         self.session.add(campaign)
@@ -184,6 +187,9 @@ class AIOrchestrator:
         out = CampaignOut.model_validate(data)
         if len(out.content_items) != req.post_count:
             raise ValueError(f"expected {req.post_count} items, got {len(out.content_items)}")
+        videos = sum(it.media_type == "video" for it in out.content_items)
+        if videos != min(req.video_count, req.post_count):
+            raise ValueError(f"expected {min(req.video_count, req.post_count)} video items, got {videos}")
         for it in out.content_items:
             if it.platform not in req.platforms:
                 raise ValueError(f"platform {it.platform} was not requested")
@@ -191,6 +197,11 @@ class AIOrchestrator:
                 raise ValueError(f"day_offset {it.day_offset} outside campaign duration")
             if it.design.template_key not in ALLOWED_TEMPLATES:
                 raise ValueError(f"unknown template_key {it.design.template_key}")
+            if it.media_type == "video":
+                if not 1 <= len(it.design.video_scenes) <= VIDEO_SCENES_MAX:
+                    raise ValueError(f"video item needs 1-{VIDEO_SCENES_MAX} video_scenes")
+                if any(len(x) > VIDEO_SCENE_MAX for x in it.design.video_scenes):
+                    raise ValueError(f"each video scene must be at most {VIDEO_SCENE_MAX} characters")
             text = f"{it.headline} {it.caption} {it.cta}".lower()
             for word in forbidden:
                 if word in text:

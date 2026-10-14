@@ -43,6 +43,16 @@ def generate_design(item_id: uuid.UUID, session: Session = Depends(get_session),
             "image_url": f"/api/v1/content-items/{item_id}/design/image", "external_url": asset.external_url}
 
 
+@router.get("/content-items/{item_id}/video")
+def design_video(item_id: uuid.UUID, session: Session = Depends(get_session)):
+    if session.get(ContentItem, item_id) is None:
+        raise HTTPException(404, "content item not found")
+    video = DesignService(session, None).latest_video(item_id)  # type: ignore[arg-type]
+    if video is None:
+        raise HTTPException(404, "no video yet")
+    return Response(LocalStorage().get(video.storage_key), media_type=video.mime_type)
+
+
 @router.get("/designs/health")
 def designs_health():
     return factory.health()

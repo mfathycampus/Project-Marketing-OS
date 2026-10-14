@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.content.state_machine import ContentStatus
 from app.db import utcnow
-from app.models import Campaign, ContentItem, DesignAsset, Project, Publication
-from app.social.provider import PermanentPublishError, PublishPayload, get_social_provider
+from app.models import Campaign, ContentItem, DesignAsset, Project, Publication, VideoAsset
+from app.social.provider import ManualProvider, PermanentPublishError, PublishPayload, get_social_provider
 from app.storage.local import LocalStorage
 
 ACTIVE = ("scheduled", "publishing", "awaiting_manual", "published")
@@ -125,13 +125,25 @@ def run_publication(session: Session, pub_id: uuid.UUID, storage: LocalStorage |
             image = storage.get(asset.storage_key)
         except OSError:
             image = None
+    video = None
+    if item.media_type == "video":
+        vasset = session.scalar(select(VideoAsset).where(VideoAsset.content_item_id == item.id)
+                                .order_by(VideoAsset.created_at.desc()))
+        try:
+            video = storage.get(vasset.storage_key) if vasset else None
+        except OSError:
+            video = None
     pub.attempts += 1
     try:
+        if item.media_type == "video" and video is None:
+            raise PermanentPublishError("لا يوجد فيديو لهذا المنشور: ولّد التصميم أولًا")
         provider = get_social_provider(pub.platform, session, pub.project_id)
+        if video is not None and not getattr(provider, "supports_video", False):
+            provider = ManualProvider()  # platform adapter cannot post video yet: hand it to a person
         pub.provider = provider.name
         result = provider.publish(PublishPayload(
             platform=pub.platform, headline=item.headline, caption=caption_for(item, pub.platform), cta=item.cta, image=image,
-            item_id=item.id, project_id=pub.project_id))
+            item_id=item.id, project_id=pub.project_id, video=video))
     except Exception as exc:  # noqa: BLE001 - recorded, retried with backoff
         pub.last_error = str(exc)[:1000]
         if isinstance(exc, PermanentPublishError):

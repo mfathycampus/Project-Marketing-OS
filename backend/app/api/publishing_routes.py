@@ -41,7 +41,7 @@ def _out(session: Session, p: Publication) -> dict:
         "provider": p.provider, "status": p.status, "scheduled_at": service._aware(p.scheduled_at),
         "published_at": service._aware(p.published_at) if p.published_at else None,
         "external_url": p.external_url, "attempts": p.attempts, "last_error": p.last_error,
-        "headline": item.headline, "caption": service.caption_for(item, p.platform), "cta": item.cta, "campaign_name": campaign.name,
+        "headline": item.headline, "caption": service.caption_for(item, p.platform), "cta": item.cta, "campaign_name": campaign.name, "media_type": item.media_type,
     }
 
 

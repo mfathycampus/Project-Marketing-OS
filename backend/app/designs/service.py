@@ -9,8 +9,9 @@ from app.content.service import move
 from app.content.state_machine import ContentStatus as S
 from app.designs.provider import DesignProvider, DesignRequest
 from app.designs.registry import REGISTRY, DesignSpecError, build_values
-from app.models import ContentItem, DesignAsset, DesignJob, Project
+from app.models import ContentItem, DesignAsset, DesignJob, Project, VideoAsset
 from app.storage.local import LocalStorage
+from app.video.renderer import PLATFORM_ASPECT, VideoRenderer, VideoRequest, scenes_for
 
 
 class DesignService:
@@ -34,12 +35,21 @@ class DesignService:
             secondary_color=brand.secondary_color if brand else "#F59E0B",
             brand_name=brand.name if brand else project.name,
         )
+        video = self._video_request(item, values, req) if item.media_type == "video" else None
         digest = hashlib.sha256(
-            json.dumps([self.provider.name, template_key, values, req.primary_color, req.secondary_color],
-                       sort_keys=True, ensure_ascii=False).encode()
+            json.dumps([self.provider.name, template_key, values, req.primary_color, req.secondary_color,
+                        video.__dict__ if video else None], sort_keys=True, ensure_ascii=False).encode()
         ).hexdigest()[:24]
         req.idempotency_key = f"{item.id}:{digest}"
         return item, req, digest
+
+    @staticmethod
+    def _video_request(item: ContentItem, values: dict, req: DesignRequest) -> VideoRequest:
+        scenes = scenes_for(values.get("headline", ""), values.get("description", ""), values.get("price", ""),
+                            item.cta, item.design.get("video_scenes"))
+        return VideoRequest(scenes=scenes, cta=item.cta, brand_name=req.brand_name, primary_color=req.primary_color,
+                            secondary_color=req.secondary_color, aspect=PLATFORM_ASPECT.get(item.platform, "9:16"),
+                            music_seed=str(item.id))
 
     def enqueue(self, item_id: uuid.UUID) -> DesignJob:
         """Create (or reuse) a design job and mark the item DESIGN_PENDING. Rendering happens in run_job."""
@@ -74,6 +84,13 @@ class DesignService:
                 height=result.height, external_url=result.external_url,
             )
             self.session.add(asset)
+            if item.media_type == "video":
+                self.session.flush()
+                video = VideoRenderer().render(self._video_request(item, req.values, req))
+                vkey = f"videos/{item.project_id}/{item.id}/{digest}.mp4"
+                self.storage.put(vkey, video.mp4)
+                self.session.add(VideoAsset(content_item_id=item.id, job_id=job.id, storage_key=vkey,
+                                            width=video.width, height=video.height, duration_ms=video.duration_ms))
             job.status = "completed"
             move(self.session, item, S.DESIGN_READY, "design ready")
             self.session.commit()
@@ -97,6 +114,11 @@ class DesignService:
             select(DesignAsset).where(DesignAsset.content_item_id == item_id)
             .order_by(DesignAsset.created_at.desc())
         )
+
+
+    def latest_video(self, item_id: uuid.UUID) -> VideoAsset | None:
+        return self.session.scalar(
+            select(VideoAsset).where(VideoAsset.content_item_id == item_id).order_by(VideoAsset.created_at.desc()))
 
 
 __all__ = ["DesignService", "DesignSpecError", "REGISTRY"]

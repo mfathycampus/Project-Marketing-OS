@@ -82,9 +82,12 @@ class MetaClient:
             data = r.json()
         except ValueError:
             data = {}
+        if not isinstance(data, dict):
+            data = {}
         if r.status_code >= 400 or "error" in data:
-            err = data.get("error", {})
-            raise MetaError(err.get("message") or f"HTTP {r.status_code}", err.get("code"))
+            err = data.get("error") if isinstance(data.get("error"), dict) else {}
+            debug = data.get("debug_info") if isinstance(data.get("debug_info"), dict) else {}  # rupload errors
+            raise MetaError(err.get("message") or debug.get("message") or f"HTTP {r.status_code}", err.get("code"))
         return data
 
     def exchange_code(self, code: str) -> str:
@@ -163,6 +166,25 @@ class MetaClient:
         return self._call("POST", _graph(f"/{ig_id}/media"),
                           data={"image_url": image_url, "caption": caption, "access_token": token})["id"]
 
+    def post_video(self, page_id: str, token: str, video: bytes, description: str) -> dict:
+        url = f"https://graph-video.facebook.com/{settings.meta_graph_version}/{page_id}/videos"
+        return self._call("POST", url, data={"description": description, "access_token": token},
+                          files={"source": ("video.mp4", video, "video/mp4")}, timeout=600)
+
+    def ig_create_reel(self, ig_id: str, token: str, caption: str, video_url: str | None = None) -> dict:
+        """Reels container. Without video_url it is a resumable upload: send the bytes with ig_upload."""
+        data = {"media_type": "REELS", "caption": caption, "share_to_feed": "true", "access_token": token}
+        if video_url:
+            data["video_url"] = video_url
+        else:
+            data["upload_type"] = "resumable"
+        return self._call("POST", _graph(f"/{ig_id}/media"), data=data)
+
+    def ig_upload(self, container_id: str, token: str, video: bytes, uri: str | None = None) -> None:
+        url = uri or f"https://rupload.facebook.com/ig-api-upload/{settings.meta_graph_version}/{container_id}"
+        self._call("POST", url, content=video, timeout=600, headers={
+            "Authorization": f"OAuth {token}", "offset": "0", "file_size": str(len(video))})
+
     def ig_status(self, container_id: str, token: str) -> str:
         return self._call("GET", _graph(f"/{container_id}"),
                           params={"fields": "status_code", "access_token": token}).get("status_code", "")
@@ -184,9 +206,12 @@ AUTH_CODES = {190, 102, 10, 200}  # expired/invalid token or missing permission
 
 
 class MetaProvider:
+    supports_video = True
+
     def __init__(self, conn: SocialConnection, session: Session, client: MetaClient | None = None,
-                 ig_wait_s: float = 30.0):
-        self.conn, self.session, self.client, self.ig_wait_s = conn, session, client or MetaClient(), ig_wait_s
+                 ig_wait_s: float = 30.0, video_wait_s: float = 300.0):
+        self.conn, self.session, self.client = conn, session, client or MetaClient()
+        self.ig_wait_s, self.video_wait_s = ig_wait_s, video_wait_s
         self.name = conn.platform
 
     def publish(self, payload: PublishPayload) -> PublishResult:
@@ -203,12 +228,18 @@ class MetaProvider:
             raise
 
     def _facebook(self, token: str, p: PublishPayload) -> PublishResult:
+        if p.video:
+            vid = self.client.post_video(self.conn.account_id, token, p.video, p.caption).get("id")
+            return PublishResult("published", vid,
+                                 f"https://www.facebook.com/{self.conn.account_id}/videos/{vid}" if vid else None)
         res = (self.client.post_photo(self.conn.account_id, token, p.image, p.caption) if p.image
                else self.client.post_text(self.conn.account_id, token, p.caption))
         post_id = res.get("post_id") or res.get("id")
         return PublishResult("published", post_id, f"https://www.facebook.com/{post_id}" if post_id else None)
 
     def _instagram(self, token: str, p: PublishPayload) -> PublishResult:
+        if p.video:
+            return self._instagram_reel(token, p)
         if not p.image or p.item_id is None:
             raise PermanentPublishError("إنستغرام يحتاج صورة؛ ولّد التصميم أولًا")
         hosted = None
@@ -225,6 +256,22 @@ class MetaProvider:
             if hosted:
                 self.client.delete_object(hosted, token)
 
+    def _instagram_reel(self, token: str, p: PublishPayload) -> PublishResult:
+        if settings.public_base_url and p.item_id:
+            url = f"{settings.public_base_url.rstrip('/')}/api/v1/content-items/{p.item_id}/video"
+            container = self.client.ig_create_reel(self.conn.account_id, token, p.caption, url)["id"]
+        else:
+            created = self.client.ig_create_reel(self.conn.account_id, token, p.caption)
+            container = created["id"]
+            try:
+                self.client.ig_upload(container, token, p.video, created.get("uri"))
+            except MetaError as exc:
+                if exc.code in AUTH_CODES:
+                    raise
+                raise PermanentPublishError(
+                    f"رفض إنستغرام رفع الفيديو مباشرة ({exc}). الحل: اضبط PUBLIC_BASE_URL (رابط عام للخادم) ثم أعد المحاولة") from exc
+        return self._finish(token, container, self.video_wait_s, 3.0, "الفيديو")
+
     def _linked_page_id(self) -> str | None:
         fb = self.session.scalar(select(SocialConnection).where(
             SocialConnection.project_id == self.conn.project_id, SocialConnection.platform == "facebook"))
@@ -232,16 +279,20 @@ class MetaProvider:
 
     def _ig_publish(self, token: str, url: str, caption: str) -> PublishResult:
         container = self.client.ig_create(self.conn.account_id, token, url, caption)
-        deadline = time.monotonic() + self.ig_wait_s
+        return self._finish(token, container, self.ig_wait_s, 1.5, "الصورة")
+
+    def _finish(self, token: str, container: str, wait_s: float, every_s: float, what: str) -> PublishResult:
+        """Wait until Instagram has processed the container, then publish it."""
+        deadline = time.monotonic() + wait_s
         while True:
             status = self.client.ig_status(container, token)
             if status == "FINISHED":
                 break
             if status in ("ERROR", "EXPIRED"):
-                raise PermanentPublishError(f"إنستغرام رفض الصورة ({status})")
+                raise PermanentPublishError(f"إنستغرام رفض {what} ({status})")
             if time.monotonic() > deadline:
                 raise MetaError("instagram media processing timed out")
-            time.sleep(1.5)
+            time.sleep(every_s)
         media_id = self.client.ig_publish(self.conn.account_id, token, container)
         return PublishResult("published", media_id, self.client.ig_permalink(media_id, token))
 

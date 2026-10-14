@@ -40,6 +40,7 @@ class ContentItem(Base, IdMixin, TimestampMixin):
     caption: Mapped[str] = mapped_column(Text, default="")
     cta: Mapped[str] = mapped_column(String(200), default="")
     design: Mapped[dict] = mapped_column(JSON, default=dict)  # internal design schema
+    media_type: Mapped[str] = mapped_column(String(10), default="image", server_default="image")  # image | video
     status: Mapped[str] = mapped_column(String(30), default=ContentStatus.AI_GENERATED.value)
 
     campaign: Mapped[Campaign] = relationship(back_populates="items")

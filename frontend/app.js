@@ -97,14 +97,14 @@ function Project({ id, tab: rawTab }) {
 function Campaigns({ pid }) {
   const [list, reload] = useFetch(`/projects/${pid}/campaigns`);
   const [busy, setBusy] = useState(false);
-  const [f, setF] = useState({ objective: "increase_orders", duration_days: 7, post_count: 5, platforms: ["instagram"], tone: "", brief: "", start_date: iso(new Date()) });
+  const [f, setF] = useState({ objective: "increase_orders", duration_days: 7, post_count: 5, video_count: 0, platforms: ["instagram"], tone: "", brief: "", start_date: iso(new Date()) });
   const set = (k, v) => setF((o) => ({ ...o, [k]: v }));
   const togglePlat = (p) => set("platforms", f.platforms.includes(p) ? f.platforms.filter((x) => x !== p) : [...f.platforms, p]);
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
     try {
-      const body = { ...f, duration_days: +f.duration_days, post_count: +f.post_count, tone: f.tone || null };
+      const body = { ...f, duration_days: +f.duration_days, post_count: +f.post_count, video_count: Math.min(+f.video_count || 0, +f.post_count), tone: f.tone || null };
       const c = await api(`/projects/${pid}/campaigns`, { method: "POST", body });
       location.hash = `#/p/${pid}/c/${c.id}`;
     } catch {} finally { setBusy(false); }
@@ -115,6 +115,7 @@ function Campaigns({ pid }) {
         <div class="field"><label>الهدف</label><select value=${f.objective} onChange=${(e) => set("objective", e.target.value)}>${Object.entries(OBJECTIVES).map(([k, v]) => html`<option value=${k}>${v}</option>`)}</select></div>
         <div class="field"><label>المدة (أيام)</label><input type="number" min="1" max="60" value=${f.duration_days} onInput=${(e) => set("duration_days", e.target.value)} /></div>
         <div class="field"><label>عدد المنشورات</label><input type="number" min="1" max="30" value=${f.post_count} onInput=${(e) => set("post_count", e.target.value)} /></div>
+        <div class="field"><label>منها فيديو (ريلز)</label><input type="number" min="0" max="30" value=${f.video_count} onInput=${(e) => set("video_count", e.target.value)} /></div>
         <div class="field"><label>تاريخ البداية</label><input type="date" value=${f.start_date} onInput=${(e) => set("start_date", e.target.value)} /></div>
       </div>
       <p><label>المنصات</label><span class="row">${Object.entries(PLATFORMS).map(([k, v]) => html`<label style="display:inline-flex;gap:6px;color:var(--ink)"><input type="checkbox" style="width:auto" checked=${f.platforms.includes(k)} onChange=${() => togglePlat(k)} />${v}</label>`)}</span></p>
@@ -152,7 +153,8 @@ function ItemCard({ it, pubs, reload, onEdit }) {
   const unscheduled = platforms.filter((pl) => !pubs.some((p) => p.platform === pl));
   const scheduleAllPlatforms = async () => { setBusy(true); try { for (const platform of unscheduled) await api(`/content-items/${it.id}/schedule`, { method: "POST", body: { platform } }); reload(); } catch {} finally { setBusy(false); } };
   return html`<div class="card item">
-    ${hasImg ? html`<img src=${`${API}/content-items/${it.id}/design/image?s=${it.status}`} alt="" loading="lazy" />`
+    ${hasImg && it.media_type === "video" ? html`<video src=${`${API}/content-items/${it.id}/video?s=${it.status}`} poster=${`${API}/content-items/${it.id}/design/image?s=${it.status}`} controls playsinline preload="none"></video>`
+      : hasImg ? html`<img src=${`${API}/content-items/${it.id}/design/image?s=${it.status}`} alt="" loading="lazy" />`
       : html`<div class="ph">${it.status === "design_pending" ? html`<${Busy} text="جارٍ التصميم..." />` : "لا يوجد تصميم بعد"}</div>`}
     <h3>${it.headline}</h3>
     <p>${it.caption}</p>
@@ -160,6 +162,8 @@ function ItemCard({ it, pubs, reload, onEdit }) {
     <div class="actions" style="margin-bottom:8px">
       ${platforms.map((pl, i) => html`<span class="badge">${PLATFORMS[pl] || pl}${i === 0 ? " ●" : ""}</span>`)}
       ${!["archived"].includes(it.status) && html`<button disabled=${busy} onClick=${() => setPlatOpen(true)}>المنصات</button>`}
+      ${!["approved", "archived"].includes(it.status) && html`<button disabled=${busy} title="بعد التغيير أعد توليد التصميم"
+        onClick=${() => act(`/content-items/${it.id}`, { method: "PATCH", body: { media_type: it.media_type === "video" ? "image" : "video" } })}>${it.media_type === "video" ? "تحويل إلى صورة" : "🎬 تحويل إلى فيديو"}</button>`}
     </div>
     <div class="actions">
       <${Badge} status=${it.status} />
@@ -360,12 +364,15 @@ function PubCard({ p, reload }) {
   return html`<div class="card item">
     <div class="actions" style="justify-content:space-between"><strong>${PLATFORMS[p.platform] || p.platform}</strong><span class=${"badge p-" + p.status}>${PSTATUS[p.status]}</span></div>
     <p class="muted" style="max-height:none">${fmtTime(p.scheduled_at)} · ${p.campaign_name}</p>
-    ${["awaiting_manual", "scheduled", "published", "failed"].includes(p.status) && html`<img src=${`${API}/content-items/${p.content_item_id}/design/image`} alt="" loading="lazy" onError=${(e) => (e.target.style.display = "none")} />`}
+    ${["awaiting_manual", "scheduled", "published", "failed"].includes(p.status) && (p.media_type === "video"
+      ? html`<video src=${`${API}/content-items/${p.content_item_id}/video`} poster=${`${API}/content-items/${p.content_item_id}/design/image`} controls playsinline preload="none"></video>`
+      : html`<img src=${`${API}/content-items/${p.content_item_id}/design/image`} alt="" loading="lazy" onError=${(e) => (e.target.style.display = "none")} />`)}
     <h3>${p.headline}</h3><p style="max-height:none;color:var(--ink)">${p.caption}</p>
     ${p.last_error && html`<p style="color:var(--bad);max-height:none">${p.last_error}</p>`}
     <div class="actions">
       ${p.status === "awaiting_manual" && html`<button onClick=${copy}>نسخ النص</button>
-        <a href=${`${API}/content-items/${p.content_item_id}/design/image`} download=${`post-${p.id.slice(0, 8)}.png`}><button type="button">تنزيل الصورة</button></a>
+        ${p.media_type === "video" ? html`<a href=${`${API}/content-items/${p.content_item_id}/video`} download=${`reel-${p.id.slice(0, 8)}.mp4`}><button type="button">تنزيل الفيديو</button></a>`
+          : html`<a href=${`${API}/content-items/${p.content_item_id}/design/image`} download=${`post-${p.id.slice(0, 8)}.png`}><button type="button">تنزيل الصورة</button></a>`}
         <input style="flex:1;min-width:140px" placeholder="رابط المنشور (اختياري)" value=${url} onInput=${(e) => setUrl(e.target.value)} />
         <button class="primary" disabled=${busy} onClick=${() => act(`/publications/${p.id}/mark-published`, { url: url || null })}>تم النشر</button>`}
       ${p.status === "published" && p.external_url && html`<a href=${p.external_url} target="_blank" rel="noopener">فتح المنشور</a>`}

@@ -17,6 +17,7 @@ dependencies = [
   "httpx>=0.27",
   "arabic-reshaper>=3.0",  # Arabic shaping for the Pillow renderer (no browser needed)
   "python-bidi>=0.4",
+  "imageio-ffmpeg>=0.5",  # bundled FFmpeg binary for video rendering (no separate install)
   "tzdata>=2024.1",  # IANA timezones on Windows
 ]
 
