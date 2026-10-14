@@ -3,9 +3,15 @@ rem One-click start for Windows: always uses backend\.venv, so pip and the serve
 setlocal
 cd /d "%~dp0"
 
-echo [1/5] Updating code...
-call "%~dp0update.bat" nopause
-cd /d "%~dp0"
+rem The whole block is parsed before it runs, so it is safe even when the update rewrites this file;
+rem afterwards the (possibly new) start.bat is run fresh.
+if not defined MOS_UPDATED (
+  echo [1/5] Updating code...
+  call "%~dp0update.bat" nopause
+  set "MOS_UPDATED=1"
+  call "%~f0"
+  exit /b
+)
 
 cd backend
 if not exist ".venv\Scripts\python.exe" (
