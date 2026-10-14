@@ -46,6 +46,11 @@ class ContentItem(Base, IdMixin, TimestampMixin):
     campaign: Mapped[Campaign] = relationship(back_populates="items")
     variants: Mapped[list["ContentVariant"]] = relationship(
         back_populates="item", cascade="all, delete-orphan", order_by="ContentVariant.created_at")
+    video_assets: Mapped[list["VideoAsset"]] = relationship(viewonly=True, lazy="selectin")  # noqa: F821
+
+    @property
+    def has_video(self) -> bool:
+        return bool(self.video_assets)
 
 
 class ContentStatusHistory(Base, IdMixin):

@@ -43,6 +43,19 @@ def generate_design(item_id: uuid.UUID, session: Session = Depends(get_session),
             "image_url": f"/api/v1/content-items/{item_id}/design/image", "external_url": asset.external_url}
 
 
+@router.post("/content-items/{item_id}/video")
+def render_video(item_id: uuid.UUID, session: Session = Depends(get_session)):
+    try:
+        v = DesignService(session, None).render_video(item_id)  # type: ignore[arg-type]
+    except LookupError:
+        raise HTTPException(404, "content item not found")
+    except (ValueError, DesignSpecError) as exc:
+        raise HTTPException(409, str(exc))
+    except Exception as exc:  # noqa: BLE001 - shown to the user
+        raise HTTPException(500, str(exc))
+    return {"video_url": f"/api/v1/content-items/{item_id}/video", "duration_ms": v.duration_ms}
+
+
 @router.get("/content-items/{item_id}/video")
 def design_video(item_id: uuid.UUID, session: Session = Depends(get_session)):
     if session.get(ContentItem, item_id) is None:

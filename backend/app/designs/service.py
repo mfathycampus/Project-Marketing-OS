@@ -39,7 +39,7 @@ class DesignService:
         )
         video = self._video_request(item, values, req) if item.media_type == "video" else None
         digest = hashlib.sha256(
-            json.dumps([self.provider.name, template_key, values, req.primary_color, req.secondary_color,
+            json.dumps([getattr(self.provider, "name", "video"), template_key, values, req.primary_color, req.secondary_color,
                         video.__dict__ if video else None], sort_keys=True, ensure_ascii=False).encode()
         ).hexdigest()[:24]
         req.idempotency_key = f"{item.id}:{digest}"
@@ -118,6 +118,23 @@ class DesignService:
             .order_by(DesignAsset.created_at.desc())
         )
 
+
+    def render_video(self, item_id: uuid.UUID) -> VideoAsset:
+        """(Re)build only the video of a video item, keeping its status (for approved/scheduled posts)."""
+        item, req, digest = self._prepare(item_id)
+        if item.media_type != "video":
+            raise ValueError("هذا المنشور ليس فيديو")
+        asset = self.latest_asset(item.id)
+        if asset is None:
+            raise ValueError("ولّد التصميم أولًا")
+        video = VideoRenderer().render(self._video_request(item, req.values, req))
+        vkey = f"videos/{item.project_id}/{item.id}/{digest}.mp4"
+        self.storage.put(vkey, video.mp4)
+        v = VideoAsset(content_item_id=item.id, job_id=asset.job_id, storage_key=vkey,
+                       width=video.width, height=video.height, duration_ms=video.duration_ms)
+        self.session.add(v)
+        self.session.commit()
+        return v
 
     def latest_video(self, item_id: uuid.UUID) -> VideoAsset | None:
         return self.session.scalar(

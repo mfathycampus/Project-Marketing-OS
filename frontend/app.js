@@ -153,9 +153,11 @@ function ItemCard({ it, pubs, reload, onEdit }) {
   const unscheduled = platforms.filter((pl) => !pubs.some((p) => p.platform === pl));
   const scheduleAllPlatforms = async () => { setBusy(true); try { for (const platform of unscheduled) await api(`/content-items/${it.id}/schedule`, { method: "POST", body: { platform } }); reload(); } catch {} finally { setBusy(false); } };
   return html`<div class="card item">
-    ${hasImg && it.media_type === "video" ? html`<video src=${`${API}/content-items/${it.id}/video?s=${it.status}`} poster=${`${API}/content-items/${it.id}/design/image?s=${it.status}`} controls playsinline preload="none"></video>`
+    ${hasImg && it.media_type === "video" && it.has_video ? html`<video src=${`${API}/content-items/${it.id}/video?s=${it.status}`} poster=${`${API}/content-items/${it.id}/design/image?s=${it.status}`} controls playsinline preload="none"></video>`
       : hasImg ? html`<img src=${`${API}/content-items/${it.id}/design/image?s=${it.status}`} alt="" loading="lazy" />`
       : html`<div class="ph">${it.status === "design_pending" ? html`<${Busy} text="جارٍ التصميم..." />` : "لا يوجد تصميم بعد"}</div>`}
+    ${hasImg && it.media_type === "video" && !it.has_video && html`<p class="error" style="max-height:none">⚠️ هذا المنشور فيديو والفيديو لم يُولَّد بعد.
+      <button disabled=${busy} onClick=${() => act(`/content-items/${it.id}/video`)}>🎬 توليد الفيديو</button></p>`}
     <h3>${it.headline}</h3>
     <p>${it.caption}</p>
     <p class="muted" style="max-height:none">${it.planned_date ? arDate(it.planned_date) : ""}</p>
@@ -371,7 +373,9 @@ function PubCard({ p, reload }) {
   return html`<div class="card item">
     <div class="actions" style="justify-content:space-between"><strong>${PLATFORMS[p.platform] || p.platform}</strong><span class=${"badge p-" + p.status}>${PSTATUS[p.status]}</span></div>
     <p class="muted" style="max-height:none">${fmtTime(p.scheduled_at)} · ${p.campaign_name}</p>
-    ${["awaiting_manual", "scheduled", "published", "failed"].includes(p.status) && (p.media_type === "video"
+    ${p.media_type === "video" && !p.has_video && p.status !== "published" && html`<p class="error" style="max-height:none">⚠️ الفيديو لم يُولَّد بعد.
+      <button disabled=${busy} onClick=${() => act(`/content-items/${p.content_item_id}/video`)}>🎬 توليد الفيديو</button> ثم «إعادة المحاولة».</p>`}
+    ${["awaiting_manual", "scheduled", "published", "failed"].includes(p.status) && (p.media_type === "video" && p.has_video
       ? html`<video src=${`${API}/content-items/${p.content_item_id}/video`} poster=${`${API}/content-items/${p.content_item_id}/design/image`} controls playsinline preload="none"></video>`
       : html`<img src=${`${API}/content-items/${p.content_item_id}/design/image`} alt="" loading="lazy" onError=${(e) => (e.target.style.display = "none")} />`)}
     <h3>${p.headline}</h3><p style="max-height:none;color:var(--ink)">${p.caption}</p>

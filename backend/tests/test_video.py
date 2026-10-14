@@ -420,3 +420,27 @@ def test_pixabay_is_used_when_pexels_has_no_key(monkeypatch, tmp_path):
     # short clip skipped; 1080p chosen over 4K (too heavy) and 720p (too small once cropped to vertical)
     assert path.name == "pixabay-8-medium.mp4" and seen[-1] == "https://px/8-medium.mp4"
     assert broll.provider_name() == "Pixabay"
+
+
+# ---------- a video item cannot be approved without its video; recovery for approved posts ----------
+def test_video_item_needs_video_before_approval_and_can_be_recovered(client, fake_llm, session, tmp_path, monkeypatch):
+    pid = make_project(client)
+    fake_llm.responses.append(campaign_payload(n=1))
+    body = client.post(f"/api/v1/projects/{pid}/campaigns", json={**REQ, "post_count": 1}).json()
+    item_id = body["items"][0]["id"]
+    storage = LocalStorage(str(tmp_path))
+    monkeypatch.setattr("app.designs.service.LocalStorage", lambda *a: storage)
+    monkeypatch.setattr("app.api.design_routes.LocalStorage", lambda *a: storage)
+    DesignService(session, StubProvider(), storage).generate(uuid.UUID(item_id))  # image design
+    # switched to video AFTER the image was made (what happened in the real app)
+    assert client.patch(f"/api/v1/content-items/{item_id}", json={"media_type": "video"}).json()["has_video"] is False
+    r = client.post(f"/api/v1/content-items/{item_id}/submit")
+    assert r.status_code == 409 and "الفيديو" in r.json()["detail"]
+    skipped = client.post(f"/api/v1/projects/{pid}/campaigns/{body['id']}/approve-all").json()["skipped"]
+    assert skipped and skipped[0]["reason"] == "video_missing"
+    # recovery without touching the status
+    r = client.post(f"/api/v1/content-items/{item_id}/video")
+    assert r.status_code == 200, r.text
+    item = client.get(f"/api/v1/projects/{pid}/campaigns/{body['id']}").json()["items"][0]
+    assert item["has_video"] is True and item["status"] == "design_ready"
+    assert client.post(f"/api/v1/content-items/{item_id}/submit").status_code == 200

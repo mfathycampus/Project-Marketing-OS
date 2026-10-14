@@ -4,7 +4,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.content.state_machine import ContentStatus as S, transition
+from app.content.state_machine import ContentStatus as S, InvalidTransition, transition
 from app.models import ContentItem, ContentStatusHistory
 
 
@@ -16,11 +16,20 @@ def move(session: Session, item: ContentItem, dst: S, note: str = "") -> Content
     return item
 
 
+def _require_video(session: Session, item: ContentItem) -> None:
+    if item.media_type == "video":
+        session.refresh(item, ["video_assets"])
+        if not item.has_video:
+            raise InvalidTransition("هذا المنشور فيديو ولم يُولَّد الفيديو بعد: اضغط «إعادة التصميم» أو «توليد الفيديو» أولًا")
+
+
 def submit_for_approval(session: Session, item: ContentItem) -> ContentItem:
+    _require_video(session, item)
     return move(session, item, S.PENDING_APPROVAL, "submitted")
 
 
 def approve(session: Session, item: ContentItem) -> ContentItem:
+    _require_video(session, item)
     return move(session, item, S.APPROVED, "approved")
 
 
@@ -34,6 +43,11 @@ def approve_all(session: Session, items: list[ContentItem]) -> dict:
     for item in items:
         status = S(item.status)
         if status is S.APPROVED:
+            continue
+        try:
+            _require_video(session, item)
+        except InvalidTransition:
+            skipped.append({"id": item.id, "status": status.value, "reason": "video_missing"})
             continue
         if status is S.DESIGN_READY:
             submit_for_approval(session, item)

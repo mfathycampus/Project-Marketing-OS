@@ -91,6 +91,7 @@ class ContentItemApi(ORM):
     cta: str
     design: dict
     media_type: str = "image"
+    has_video: bool = False
     status: str
     variants: list[VariantApi] = []
 
