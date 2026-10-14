@@ -51,7 +51,7 @@ class DesignService:
                             item.cta, item.design.get("video_scenes"))
         return VideoRequest(scenes=scenes, cta=item.cta, brand_name=req.brand_name, primary_color=req.primary_color,
                             secondary_color=req.secondary_color, aspect=PLATFORM_ASPECT.get(item.platform, "9:16"),
-                            music_seed=str(item.id), voice=settings.tts_voice if voice.enabled() else "",
+                            music_seed=str(item.id), voice=voice.current_voice(),
                             broll=[q for q in item.design.get("video_broll") or [] if q.strip()] if broll.enabled() else [])
 
     def enqueue(self, item_id: uuid.UUID) -> DesignJob:

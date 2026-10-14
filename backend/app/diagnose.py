@@ -38,6 +38,12 @@ def main() -> None:
         v = getattr(settings, name)
         print(f"{name.upper()}: {'set (%d chars)' % len(v) if v else 'EMPTY'}")
     print("TTS_VOICE:", settings.tts_voice)
+    for name in ("elevenlabs_api_key", "elevenlabs_voice_id"):
+        v = getattr(settings, name)
+        print(f"{name.upper()}: {'set (%d chars)' % len(v) if v else 'EMPTY'}")
+    from app.video import voice as _voice
+
+    print("VOICE in use:", _voice.current_voice() or "none")
     for name in ("meta_app_id", "meta_app_secret"):
         v = getattr(settings, name)
         print(f"{name.upper()}: {'set (%d chars)' % len(v) if v else 'EMPTY'}")

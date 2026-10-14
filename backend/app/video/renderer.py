@@ -5,6 +5,7 @@ animated frame by frame (fade/slide-in, drifting light, progress bar, pulsing CT
 FFmpeg comes from the imageio-ffmpeg wheel, so `pip install` is enough on Windows too.
 """
 import hashlib
+import logging
 import math
 import os
 import shutil
@@ -18,6 +19,7 @@ from PIL import Image, ImageDraw, ImageFilter
 from app.designs.pillow_renderer import DARK, INK, Block, _Canvas, _gradient, _rgb
 from app.video import broll, voice
 
+log = logging.getLogger(__name__)
 FPS = 30
 VOICE_LEAD = 0.3  # narration starts shortly after the scene text begins to appear
 MUSIC_DIR = Path(__file__).parent / "music"
@@ -223,9 +225,15 @@ class VideoRenderer:
         if not req.voice:
             return []
         out = []
-        for text in req.scenes:
-            data = voice.synthesize(text, req.voice)
-            out.append((data, voice.wav_seconds(data)))
+        try:
+            for text in req.scenes:
+                data = voice.synthesize(text, req.voice)
+                out.append((data, voice.wav_seconds(data)))
+        except voice.VoiceError as exc:
+            if not req.voice.startswith("edge:"):
+                raise  # a configured paid/official provider failing must be visible
+            log.warning("free edge-tts voice unavailable, video rendered without narration: %s", exc)
+            return []
         return out
 
     # ---------- drawing ----------

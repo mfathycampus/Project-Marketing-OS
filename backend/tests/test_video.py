@@ -23,6 +23,7 @@ from tests.test_designs import StubProvider
 def fast_video(monkeypatch):
     monkeypatch.setattr(renderer, "FPS", 4)  # keep tests quick; real videos are 30 fps
     monkeypatch.setattr(settings, "encryption_key", "k" * 40)
+    monkeypatch.setattr(settings, "voice_provider", "off")  # tests never call real voice services
 
 
 def video_payload(n=2, videos=1):
@@ -234,16 +235,87 @@ def test_voiceover_sets_scene_length_and_mixes_with_music(monkeypatch, tmp_path)
     assert "aac" in info
 
 
-def test_service_passes_voice_only_when_configured(monkeypatch):
-    from app.designs.service import DesignService
+def test_voice_provider_priority(monkeypatch):
     from app.designs.provider import DesignRequest
+    from app.designs.service import DesignService
+    from app.video import voice
 
     item = ContentItem(platform="instagram", cta="اطلب", design={}, media_type="video")
-    monkeypatch.setattr(settings, "azure_speech_key", "")
-    assert DesignService._video_request(item, {"headline": "ع"}, DesignRequest("offer_square", {})).voice == ""
+    for k in ("elevenlabs_api_key", "elevenlabs_voice_id", "azure_speech_key", "azure_speech_region"):
+        monkeypatch.setattr(settings, k, "")
+    monkeypatch.setattr(settings, "voice_provider", "auto")
+    monkeypatch.setattr(voice, "_edge_available", lambda: True)
+    assert voice.current_voice() == f"edge:{settings.tts_voice}"  # free default, no key
     monkeypatch.setattr(settings, "azure_speech_key", "K")
     monkeypatch.setattr(settings, "azure_speech_region", "eastus")
-    assert DesignService._video_request(item, {"headline": "ع"}, DesignRequest("offer_square", {})).voice == settings.tts_voice
+    assert voice.current_voice().startswith("azure:")
+    monkeypatch.setattr(settings, "elevenlabs_api_key", "E")
+    monkeypatch.setattr(settings, "elevenlabs_voice_id", "VID")
+    assert voice.current_voice() == "elevenlabs:VID"
+    assert DesignService._video_request(item, {"headline": "ع"}, DesignRequest("offer_square", {})).voice == "elevenlabs:VID"
+    monkeypatch.setattr(settings, "voice_provider", "off")
+    assert voice.current_voice() == ""
+    monkeypatch.setattr(settings, "voice_provider", "auto")
+    monkeypatch.setattr(voice, "_edge_available", lambda: False)
+    monkeypatch.setattr(settings, "elevenlabs_api_key", "")
+    monkeypatch.setattr(settings, "azure_speech_key", "")
+    assert voice.current_voice() == ""
+
+
+def test_elevenlabs_request_and_errors(monkeypatch, tmp_path):
+    from app.video import voice
+
+    monkeypatch.setattr(settings, "elevenlabs_api_key", "XI")
+    seen = []
+
+    def handler(req: httpx.Request):
+        seen.append(req)
+        return httpx.Response(200, content=b"\x01\x00" * 24000)  # 1 s of raw 16-bit PCM
+
+    store = LocalStorage(str(tmp_path))
+    wav = voice.synthesize("مرحبا", "elevenlabs:VID", httpx.Client(transport=httpx.MockTransport(handler)), store)
+    req = seen[0]
+    assert req.url.path == "/v1/text-to-speech/VID" and req.url.params["output_format"] == "pcm_24000"
+    assert req.headers["xi-api-key"] == "XI" and b'"model_id"' in req.content
+    assert abs(voice.wav_seconds(wav) - 1.0) < 0.01
+    for status, body, match in ((401, "", "set-elevenlabs"), (404, "", "My Voices"),
+                                (400, '{"detail":{"status":"quota_exceeded"}}', "رصيد")):
+        bad = httpx.Client(transport=httpx.MockTransport(lambda r, s=status, b=body: httpx.Response(s, text=b)))
+        with pytest.raises(voice.VoiceError, match=match):
+            voice.synthesize(f"نص {status}", "elevenlabs:VID", bad, store)
+
+
+def test_edge_voice_converts_mp3_to_wav(monkeypatch, tmp_path):
+    import subprocess
+    import sys
+    import types
+
+    from app.video import voice
+
+    class Communicate:
+        def __init__(self, text, v, rate="+0%"):
+            assert v == "ar-SA-ZariyahNeural" and rate == settings.tts_rate
+
+        async def save(self, path):
+            subprocess.run([renderer.ffmpeg_exe(), "-v", "error", "-f", "lavfi", "-i",
+                            "sine=frequency=300:duration=1.5", path], check=True)
+
+    monkeypatch.setitem(sys.modules, "edge_tts", types.SimpleNamespace(Communicate=Communicate))
+    wav = voice.synthesize("نص", "edge:ar-SA-ZariyahNeural", storage=LocalStorage(str(tmp_path)))
+    assert 1.4 < voice.wav_seconds(wav) < 1.7
+
+
+def test_edge_failure_renders_video_without_voice(monkeypatch):
+    from app.video import voice
+
+    def boom(*a, **k):
+        raise voice.VoiceError("offline")
+
+    monkeypatch.setattr(voice, "synthesize", boom)
+    res = renderer.VideoRenderer().render(renderer.VideoRequest(["أ"], voice="edge:ar-SA-HamedNeural"))
+    assert res.duration_ms >= 2600
+    with pytest.raises(voice.VoiceError):  # a configured paid provider failing is reported, not hidden
+        renderer.VideoRenderer().render(renderer.VideoRequest(["أ"], voice="elevenlabs:VID"))
 
 
 # ---------- Pexels footage ----------

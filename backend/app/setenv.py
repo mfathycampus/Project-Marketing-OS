@@ -9,7 +9,8 @@ from pathlib import Path
 
 from app.config import _ROOT
 
-OPTIONAL = {"TTS_VOICE"}
+OPTIONAL = {"TTS_VOICE", "TTS_RATE"}
+PLAIN = {"ELEVENLABS_VOICE_ID"}  # not secret: shown while typing
 ENV_FILES = (_ROOT / ".env", _ROOT / "backend" / ".env")
 
 
@@ -41,7 +42,7 @@ def targets(name: str) -> list[Path]:
 
 def main(names: list[str]) -> None:
     for name in names:
-        ask = getpass.getpass if "SECRET" in name or "KEY" in name else input
+        ask = getpass.getpass if ("SECRET" in name or "KEY" in name) and name not in PLAIN else input
         hint = " (Enter to skip)" if name in OPTIONAL else ""
         value = clean(ask(f"{name}{hint} (paste then Enter): "))
         if not value:

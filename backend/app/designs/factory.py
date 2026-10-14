@@ -72,7 +72,7 @@ def health() -> dict:
         "font_regular": info["font_regular"],
         "font_bold": info["font_bold"],
         "ffmpeg": _ffmpeg(),
-        "voice": settings.tts_voice if _voice_on() else None,
+        "voice": _voice(),
         "footage": _footage(),
     }
 
@@ -83,10 +83,10 @@ def _footage() -> str | None:
     return broll.provider_name()
 
 
-def _voice_on() -> bool:
+def _voice() -> str | None:
     from app.video import voice
 
-    return voice.enabled()
+    return voice.current_voice() or None
 
 
 def _ffmpeg() -> str | None:

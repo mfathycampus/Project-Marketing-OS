@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     azure_speech_region: str = ""  # e.g. westeurope / eastus / uaenorth (from the resource's "Keys and Endpoint")
     tts_voice: str = "ar-SA-HamedNeural"  # ar-SA-ZariyahNeural, ar-AE-FatimaNeural, ar-AE-HamdanNeural, ar-KW-FahedNeural ...
     tts_rate: str = "+0%"  # speaking speed, e.g. +10%
+    voice_provider: str = "auto"  # auto (elevenlabs > azure > edge) | elevenlabs | azure | edge | off
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id: str = ""  # from your ElevenLabs "My Voices" (python -m app.video.voice lists them)
+    elevenlabs_model: str = "eleven_multilingual_v2"  # supports Arabic
     pexels_api_key: str = ""  # free key from pexels.com/api -> real footage behind video scenes
     pixabay_api_key: str = ""  # alternative footage source (free key: pixabay.com/api/docs) when Pexels is unavailable
     public_base_url: str = ""  # optional; without it Instagram images are hosted via the linked Facebook Page
@@ -67,7 +71,7 @@ class Settings(BaseSettings):
                 return prefix + (_BACKEND / path).as_posix()
         return v
 
-    @field_validator("encryption_key", "canva_client_id", "canva_client_secret", "anthropic_api_key", "meta_app_id", "meta_app_secret", "linkedin_client_id", "linkedin_client_secret", "azure_speech_key", "pexels_api_key", "pixabay_api_key", mode="before")
+    @field_validator("encryption_key", "canva_client_id", "canva_client_secret", "anthropic_api_key", "meta_app_id", "meta_app_secret", "linkedin_client_id", "linkedin_client_secret", "azure_speech_key", "pexels_api_key", "pixabay_api_key", "elevenlabs_api_key", "elevenlabs_voice_id", mode="before")
     @classmethod
     def _clean_secret(cls, v):
         """Tolerate quotes, stray whitespace and inline '# comments' pasted into .env."""
