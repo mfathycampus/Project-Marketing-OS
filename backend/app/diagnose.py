@@ -34,6 +34,10 @@ def main() -> None:
     for name in ("canva_client_id", "canva_client_secret", "anthropic_api_key"):
         v = getattr(settings, name)
         print(f"{name.upper()}: {'set (%d chars)' % len(v) if v else 'EMPTY'}")
+    for name in ("azure_speech_key", "azure_speech_region"):
+        v = getattr(settings, name)
+        print(f"{name.upper()}: {'set (%d chars)' % len(v) if v else 'EMPTY'}")
+    print("TTS_VOICE:", settings.tts_voice)
     for name in ("meta_app_id", "meta_app_secret"):
         v = getattr(settings, name)
         print(f"{name.upper()}: {'set (%d chars)' % len(v) if v else 'EMPTY'}")

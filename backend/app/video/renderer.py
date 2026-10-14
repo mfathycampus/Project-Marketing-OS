@@ -16,8 +16,10 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 
 from app.designs.pillow_renderer import DARK, INK, Block, _Canvas, _gradient, _rgb
+from app.video import voice
 
 FPS = 30
+VOICE_LEAD = 0.3  # narration starts shortly after the scene text begins to appear
 MUSIC_DIR = Path(__file__).parent / "music"
 AUDIO_EXT = (".mp3", ".m4a", ".aac", ".wav", ".ogg")
 SIZES = {"9:16": (1080, 1920), "1:1": (1080, 1080), "4:5": (1080, 1350)}
@@ -38,6 +40,7 @@ class VideoRequest:
     aspect: str = "9:16"
     rtl: bool = True
     music_seed: str = ""
+    voice: str = ""  # Azure voice name (e.g. ar-SA-HamedNeural); empty = no narration
 
 
 @dataclass
@@ -102,30 +105,48 @@ class VideoRenderer:
         glow = self._glow(int(w * 0.9), secondary)
         brand = self._layer(w, Block(req.brand_name, 44, alpha=0.85), req.rtl, margin) if req.brand_name else None
 
+        clips = self._voice_clips(req)  # [(wav, seconds)] per scene, empty when no voice
         layers = []
         for i, text in enumerate(req.scenes):
             is_cta = i == len(req.scenes) - 1 and text == req.cta and bool(req.cta)
             block = (Block(text, 76, True, ink, line_height=1.25, pill=secondary, pad=(34, 80), align="center")
                      if is_cta else Block(text, 112 if i == 0 else 84, True, white, line_height=1.3,
                                           align="center"))
-            layers.append((self._layer(w, block, req.rtl, margin, max_h=int(h * 0.6)), _scene_seconds(text), is_cta))
+            dur = _scene_seconds(text)
+            if clips:  # the scene lasts as long as its narration (+ lead-in and a breath)
+                dur = max(dur, VOICE_LEAD + clips[i][1] + 0.45)
+            layers.append((self._layer(w, block, req.rtl, margin, max_h=int(h * 0.6)), dur, is_cta))
 
         total = sum(d for _, d, _ in layers)
         n_frames = int(total * FPS)
         cmd = [ffmpeg_exe(), "-v", "error", "-y",
                "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(FPS), "-i", "-"]
         music = pick_music(req.music_seed or "|".join(req.scenes))
-        if music:
-            cmd += ["-stream_loop", "-1", "-i", str(music)]
-            afilter = f"afade=t=in:d=0.6,afade=t=out:st={max(0.0, total - 1.2):.2f}:d=1.2,volume=0.8"
-        else:
-            cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
-            afilter = "anull"
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "out.mp4"
-            cmd += ["-filter:a", afilter, "-map", "0:v", "-map", "1:a", "-t", f"{total:.3f}",
+            fades = f"afade=t=in:d=0.6,afade=t=out:st={max(0.0, total - 1.2):.2f}:d=1.2"
+            if music:
+                cmd += ["-stream_loop", "-1", "-i", str(music)]
+            if clips:
+                starts, at = [], 0.0
+                for _, d, _ in layers:
+                    starts.append(at + VOICE_LEAD)
+                    at += d
+                track = Path(tmp) / "voice.wav"
+                track.write_bytes(voice.build_track([(st, c[0]) for st, c in zip(starts, clips)], total))
+                cmd += ["-i", str(track)]
+            if music and clips:  # music ducked under the narration
+                graph = f"[1:a]{fades},volume=0.18[m];[2:a]apad[v];[m][v]amix=inputs=2:duration=longest:normalize=0[a]"
+            elif music:
+                graph = f"[1:a]{fades},volume=0.8[a]"
+            elif clips:
+                graph = "[1:a]apad[a]"
+            else:
+                cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
+                graph = "[1:a]anull[a]"
+            cmd += ["-filter_complex", graph, "-map", "0:v", "-map", "[a]", "-t", f"{total:.3f}",
                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-                    "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-movflags", "+faststart", str(out)]
+                    "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2", "-movflags", "+faststart", str(out)]
             proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
             try:
                 start = 0.0
@@ -148,6 +169,16 @@ class VideoRenderer:
                 raise VideoError(f"فشل ترميز الفيديو: {err.strip()[-400:]}")
             data = out.read_bytes()
         return VideoResult(mp4=data, width=w, height=h, duration_ms=int(total * 1000))
+
+    @staticmethod
+    def _voice_clips(req: VideoRequest) -> list[tuple[bytes, float]]:
+        if not req.voice:
+            return []
+        out = []
+        for text in req.scenes:
+            data = voice.synthesize(text, req.voice)
+            out.append((data, voice.wav_seconds(data)))
+        return out
 
     # ---------- drawing ----------
     @staticmethod

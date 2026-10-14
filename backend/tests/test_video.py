@@ -172,3 +172,75 @@ def test_video_item_without_video_fails_clearly(client, fake_llm, session, tmp_p
     session.commit()
     pub = pub_service.run_publication(session, pub_id, storage)
     assert pub.status == "failed" and "فيديو" in pub.last_error
+
+
+# ---------- voiceover (Azure Speech) ----------
+def _tone_wav(seconds: float) -> bytes:
+    import io
+    import math
+    import struct
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(24000)
+        w.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(i / 10))) for i in range(int(seconds * 24000))))
+    return buf.getvalue()
+
+
+def test_azure_request_is_cached_and_errors_are_clear(monkeypatch, tmp_path):
+    from app.video import voice
+
+    monkeypatch.setattr(settings, "azure_speech_key", "KEY")
+    monkeypatch.setattr(settings, "azure_speech_region", "westeurope")
+    calls = []
+
+    def handler(req: httpx.Request):
+        calls.append(req)
+        return httpx.Response(200, content=_tone_wav(1.0))
+
+    store = LocalStorage(str(tmp_path))
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    a = voice.synthesize("مرحبا <بكم>", "ar-SA-HamedNeural", http, store)
+    b = voice.synthesize("مرحبا <بكم>", "ar-SA-HamedNeural", http, store)
+    assert a == b and len(calls) == 1 and abs(voice.wav_seconds(a) - 1.0) < 0.01
+    req = calls[0]
+    assert req.url.host == "westeurope.tts.speech.microsoft.com" and req.headers["ocp-apim-subscription-key"] == "KEY"
+    assert req.headers["x-microsoft-outputformat"] == "riff-24khz-16bit-mono-pcm"
+    body = req.content.decode()
+    assert "ar-SA-HamedNeural" in body and "&lt;بكم&gt;" in body and "xml:lang='ar-SA'" in body
+    bad = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(401)))
+    with pytest.raises(voice.VoiceError, match="set-azure"):
+        voice.synthesize("نص آخر", "ar-SA-HamedNeural", bad, store)
+
+
+def test_voiceover_sets_scene_length_and_mixes_with_music(monkeypatch, tmp_path):
+    import subprocess
+
+    from app.video import voice
+
+    monkeypatch.setattr(voice, "synthesize", lambda text, v=None, *a, **k: _tone_wav(4.0))
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    subprocess.run([renderer.ffmpeg_exe(), "-v", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=2",
+                    str(music_dir / "t.wav")], check=True)
+    monkeypatch.setattr(renderer, "MUSIC_DIR", music_dir)
+    res = renderer.VideoRenderer().render(renderer.VideoRequest(["أ", "ب"], voice="ar-SA-HamedNeural"))
+    # each scene = 0.3 lead + 4.0 voice + 0.45 (> the 2.6s text minimum)
+    assert abs(res.duration_ms - 2 * 4750) <= 300
+    info = subprocess.run([renderer.ffmpeg_exe(), "-i", "-"], input=res.mp4, capture_output=True).stderr.decode(errors="replace")
+    assert "aac" in info
+
+
+def test_service_passes_voice_only_when_configured(monkeypatch):
+    from app.designs.service import DesignService
+    from app.designs.provider import DesignRequest
+
+    item = ContentItem(platform="instagram", cta="اطلب", design={}, media_type="video")
+    monkeypatch.setattr(settings, "azure_speech_key", "")
+    assert DesignService._video_request(item, {"headline": "ع"}, DesignRequest("offer_square", {})).voice == ""
+    monkeypatch.setattr(settings, "azure_speech_key", "K")
+    monkeypatch.setattr(settings, "azure_speech_region", "eastus")
+    assert DesignService._video_request(item, {"headline": "ع"}, DesignRequest("offer_square", {})).voice == settings.tts_voice

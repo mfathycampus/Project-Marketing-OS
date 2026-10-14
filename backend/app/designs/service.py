@@ -11,6 +11,8 @@ from app.designs.provider import DesignProvider, DesignRequest
 from app.designs.registry import REGISTRY, DesignSpecError, build_values
 from app.models import ContentItem, DesignAsset, DesignJob, Project, VideoAsset
 from app.storage.local import LocalStorage
+from app.config import settings
+from app.video import voice
 from app.video.renderer import PLATFORM_ASPECT, VideoRenderer, VideoRequest, scenes_for
 
 
@@ -49,7 +51,7 @@ class DesignService:
                             item.cta, item.design.get("video_scenes"))
         return VideoRequest(scenes=scenes, cta=item.cta, brand_name=req.brand_name, primary_color=req.primary_color,
                             secondary_color=req.secondary_color, aspect=PLATFORM_ASPECT.get(item.platform, "9:16"),
-                            music_seed=str(item.id))
+                            music_seed=str(item.id), voice=settings.tts_voice if voice.enabled() else "")
 
     def enqueue(self, item_id: uuid.UUID) -> DesignJob:
         """Create (or reuse) a design job and mark the item DESIGN_PENDING. Rendering happens in run_job."""

@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     linkedin_api_version: str = "202510"  # YYYYMM; LinkedIn retires old versions after ~a year
     linkedin_scopes: str = "r_organization_social w_organization_social rw_organization_admin"
     meta_config_id: str = ""  # only for 'Facebook Login for Business' apps (replaces scopes)
+    azure_speech_key: str = ""  # Azure AI Speech (free tier F0: 0.5M characters/month) -> Arabic voiceover
+    azure_speech_region: str = ""  # e.g. westeurope / eastus / uaenorth (from the resource's "Keys and Endpoint")
+    tts_voice: str = "ar-SA-HamedNeural"  # ar-SA-ZariyahNeural, ar-AE-FatimaNeural, ar-AE-HamdanNeural, ar-KW-FahedNeural ...
+    tts_rate: str = "+0%"  # speaking speed, e.g. +10%
     public_base_url: str = ""  # optional; without it Instagram images are hosted via the linked Facebook Page
     publish_provider: str = "manual"  # manual | dryrun (real platform providers plug in here)
     publish_poll_interval_s: float = 5.0
@@ -61,7 +65,7 @@ class Settings(BaseSettings):
                 return prefix + (_BACKEND / path).as_posix()
         return v
 
-    @field_validator("encryption_key", "canva_client_id", "canva_client_secret", "anthropic_api_key", "meta_app_id", "meta_app_secret", "linkedin_client_id", "linkedin_client_secret", mode="before")
+    @field_validator("encryption_key", "canva_client_id", "canva_client_secret", "anthropic_api_key", "meta_app_id", "meta_app_secret", "linkedin_client_id", "linkedin_client_secret", "azure_speech_key", mode="before")
     @classmethod
     def _clean_secret(cls, v):
         """Tolerate quotes, stray whitespace and inline '# comments' pasted into .env."""

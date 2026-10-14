@@ -9,6 +9,7 @@ from pathlib import Path
 
 from app.config import _ROOT
 
+OPTIONAL = {"TTS_VOICE"}
 ENV_FILES = (_ROOT / ".env", _ROOT / "backend" / ".env")
 
 
@@ -41,7 +42,8 @@ def targets(name: str) -> list[Path]:
 def main(names: list[str]) -> None:
     for name in names:
         ask = getpass.getpass if "SECRET" in name or "KEY" in name else input
-        value = clean(ask(f"{name} (paste then Enter): "))
+        hint = " (Enter to skip)" if name in OPTIONAL else ""
+        value = clean(ask(f"{name}{hint} (paste then Enter): "))
         if not value:
             print(f"  {name}: skipped (empty)")
             continue

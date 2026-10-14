@@ -72,7 +72,14 @@ def health() -> dict:
         "font_regular": info["font_regular"],
         "font_bold": info["font_bold"],
         "ffmpeg": _ffmpeg(),
+        "voice": settings.tts_voice if _voice_on() else None,
     }
+
+
+def _voice_on() -> bool:
+    from app.video import voice
+
+    return voice.enabled()
 
 
 def _ffmpeg() -> str | None:
