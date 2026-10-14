@@ -87,3 +87,14 @@ def test_ai_run_recorded_and_transition_api(client, fake_llm, session):
     item = body["items"][0]["id"]
     assert client.post(f"/api/v1/content-items/{item}/transition", params={"to": "approved"}).status_code == 409
     assert client.post(f"/api/v1/content-items/{item}/transition", params={"to": "design_pending"}).status_code == 200
+
+
+def test_setenv_replaces_in_place_and_cleans(tmp_path):
+    from app import setenv
+
+    env = tmp_path / ".env"
+    env.write_bytes("﻿A=1\nLINKEDIN_CLIENT_ID =old\n# LINKEDIN_CLIENT_ID=comment\nLINKEDIN_CLIENT_ID=dup\n".encode())
+    setenv.set_key(env, "LINKEDIN_CLIENT_ID", setenv.clean('  "86abc"  '))
+    setenv.set_key(env, "LINKEDIN_CLIENT_SECRET", "s3")
+    assert env.read_text(encoding="utf-8") == (
+        "A=1\nLINKEDIN_CLIENT_ID=86abc\n# LINKEDIN_CLIENT_ID=comment\nLINKEDIN_CLIENT_SECRET=s3\n")
