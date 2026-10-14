@@ -137,15 +137,14 @@ def test_each_platform_publishes_through_its_own_connection(client, approved, en
     assert seen == ["/" + settings.meta_graph_version + "/PG/photos"]
 
 
-def test_instagram_rejects_story_shaped_images(session, monkeypatch):
-    monkeypatch.setattr(settings, "encryption_key", "k" * 40)
-    monkeypatch.setattr(settings, "public_base_url", "https://pub.example.com")
-    buf = io.BytesIO()
-    Image.new("RGB", (1080, 1920)).save(buf, "PNG")
-    conn = SocialConnection(project_id=uuid.uuid4(), platform="instagram", account_id="I", account_name="n", token_enc=encrypt("T"))
-    prov = meta.MetaProvider(conn, session, meta.MetaClient(httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500)))))
-    with pytest.raises(PermanentPublishError, match="1080x1920"):
-        prov.publish(PublishPayload("instagram", "h", "c", "c", image=buf.getvalue(), item_id=uuid.uuid4()))
+def test_instagram_fits_story_shaped_images_instead_of_rejecting():
+    from app.social.images import instagram_jpeg
+
+    for size, expected in [((1080, 1920), (1080, 1350)), ((1080, 1080), (1080, 1080)), ((3000, 1000), (1080, 565))]:
+        buf = io.BytesIO()
+        Image.new("RGB", size, "teal").save(buf, "PNG")
+        out = Image.open(io.BytesIO(instagram_jpeg(buf.getvalue())))
+        assert out.format == "JPEG" and out.size == expected
 
 
 def test_check_public_url(client, monkeypatch):

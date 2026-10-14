@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.designs.canva.crypto import decrypt, derive_key, encrypt
 from app.models import SocialConnection
+from app.social.images import instagram_jpeg
 from app.social.provider import PermanentPublishError, PublishPayload, PublishResult
 
 SCOPES = ["pages_show_list", "pages_read_engagement", "pages_manage_posts",
@@ -207,25 +208,9 @@ class MetaProvider:
         post_id = res.get("post_id") or res.get("id")
         return PublishResult("published", post_id, f"https://www.facebook.com/{post_id}" if post_id else None)
 
-    @staticmethod
-    def _check_ratio(image: bytes) -> None:
-        """Instagram feed images must be between 4:5 and 1.91:1. Story-shaped (9:16) designs are rejected."""
-        try:
-            import io
-
-            from PIL import Image
-
-            w, h = Image.open(io.BytesIO(image)).size
-        except Exception:  # noqa: BLE001 - unreadable image: let Instagram decide
-            return
-        if not 0.8 <= w / h <= 1.91:
-            raise PermanentPublishError(
-                f"أبعاد الصورة ({w}x{h}) لا يقبلها إنستغرام كمنشور. استخدم قالبًا مربعًا بدل قالب الستوري")
-
     def _instagram(self, token: str, p: PublishPayload) -> PublishResult:
         if not p.image or p.item_id is None:
             raise PermanentPublishError("إنستغرام يحتاج صورة؛ ولّد التصميم أولًا")
-        self._check_ratio(p.image)
         hosted = None
         if settings.public_base_url:
             url = f"{settings.public_base_url.rstrip('/')}/api/v1/content-items/{p.item_id}/design/image?format=jpeg"
@@ -233,7 +218,7 @@ class MetaProvider:
             page_id = self._linked_page_id()
             if not page_id:
                 raise PermanentPublishError("إنستغرام يحتاج رابطًا عامًا للصورة: اربط صفحة فيسبوك (أعد الربط بحساب Meta) أو اضبط PUBLIC_BASE_URL")
-            hosted, url = self.client.host_image(page_id, token, _to_jpeg(p.image))
+            hosted, url = self.client.host_image(page_id, token, instagram_jpeg(p.image))
         try:
             return self._ig_publish(token, url, p.caption)
         finally:
@@ -253,22 +238,12 @@ class MetaProvider:
             if status == "FINISHED":
                 break
             if status in ("ERROR", "EXPIRED"):
-                raise PermanentPublishError(f"إنستغرام رفض الصورة ({status}). تأكد أن الأبعاد مقبولة")
+                raise PermanentPublishError(f"إنستغرام رفض الصورة ({status})")
             if time.monotonic() > deadline:
                 raise MetaError("instagram media processing timed out")
             time.sleep(1.5)
         media_id = self.client.ig_publish(self.conn.account_id, token, container)
         return PublishResult("published", media_id, self.client.ig_permalink(media_id, token))
-
-
-def _to_jpeg(image: bytes) -> bytes:
-    import io
-
-    from PIL import Image
-
-    buf = io.BytesIO()
-    Image.open(io.BytesIO(image)).convert("RGB").save(buf, "JPEG", quality=92)
-    return buf.getvalue()
 
 
 def provider_for(session: Session, project_id: uuid.UUID, platform: str) -> MetaProvider | None:

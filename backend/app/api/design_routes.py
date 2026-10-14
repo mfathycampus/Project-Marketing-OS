@@ -56,14 +56,10 @@ def design_image(item_id: uuid.UUID, format: str | None = None, session: Session
     if asset is None:
         raise HTTPException(404, "no design yet")
     data = LocalStorage().get(asset.storage_key)
-    if format == "jpeg":  # Instagram only accepts JPEG
-        import io
+    if format == "jpeg":  # Instagram: JPEG in an accepted shape
+        from app.social.images import instagram_jpeg
 
-        from PIL import Image
-
-        buf = io.BytesIO()
-        Image.open(io.BytesIO(data)).convert("RGB").save(buf, "JPEG", quality=92)
-        return Response(buf.getvalue(), media_type="image/jpeg")
+        return Response(instagram_jpeg(data), media_type="image/jpeg")
     return Response(data, media_type=asset.mime_type)
 
 
