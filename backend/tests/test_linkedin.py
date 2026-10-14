@@ -186,3 +186,13 @@ def test_scheduler_publishes_to_linkedin_when_connected(client, approved, engine
     assert worker.process_due() == 1
     pub = next(p for p in client.get(f"/api/v1/projects/{pid}/publications").json() if p["platform"] == "linkedin")
     assert pub["status"] == "published" and pub["provider"] == "linkedin" and pub["external_url"].endswith("urn:li:share:55")
+
+
+def test_callback_explains_invalid_scope(client, monkeypatch):
+    from app.social import linkedin
+
+    monkeypatch.setattr(linkedin, "read_state", lambda state: "p1")
+    r = client.get("/api/v1/linkedin/callback", params={
+        "state": "s", "error": "invalid_scope", "error_description": "The requested permission scope is not valid"},
+        follow_redirects=False)
+    assert "Community%20Management%20API" in r.headers["location"]

@@ -52,7 +52,11 @@ def linkedin_callback(state: str, code: str | None = None, error: str | None = N
     except linkedin.LinkedInError as exc:
         raise HTTPException(400, str(exc))
     if error or not code:
-        return _ui(project_id, "li_error=" + quote(error_description or error or "cancelled"))
+        msg = error_description or error or "cancelled"
+        if "scope" in msg.lower():
+            msg += (" — صلاحيات صفحة الشركة غير مفعّلة لتطبيقك بعد: اطلب منتج Community Management API من تبويب "
+                    "Products في تطبيق LinkedIn، وبعد الموافقة تظهر الصلاحيات في تبويب Auth (OAuth 2.0 scopes)")
+        return _ui(project_id, "li_error=" + quote(msg))
     client = linkedin.LinkedInClient()
     try:
         tokens = client.exchange_code(code)
