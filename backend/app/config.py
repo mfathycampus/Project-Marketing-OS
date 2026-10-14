@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     linkedin_api_version: str = "202510"  # YYYYMM; LinkedIn retires old versions after ~a year
     linkedin_scopes: str = "r_organization_social w_organization_social rw_organization_admin"
     meta_config_id: str = ""  # only for 'Facebook Login for Business' apps (replaces scopes)
-    public_base_url: str = ""  # public URL of this server; Instagram fetches images from it
+    public_base_url: str = ""  # optional; without it Instagram images are hosted via the linked Facebook Page
     publish_provider: str = "manual"  # manual | dryrun (real platform providers plug in here)
     publish_poll_interval_s: float = 5.0
     publish_default_time: str = "19:00"  # local project time

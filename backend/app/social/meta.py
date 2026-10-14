@@ -137,6 +137,24 @@ class MetaClient:
         return self._call("POST", _graph(f"/{page_id}/photos"), data={"caption": caption, "access_token": token},
                           files={"source": ("post.png", image, "image/png")})
 
+    def host_image(self, page_id: str, token: str, jpeg: bytes) -> tuple[str, str]:
+        """Upload as an *unpublished* Page photo (not shown on the Page) and return (photo_id, public CDN URL).
+        Lets Instagram fetch the image without exposing this server to the internet."""
+        photo_id = self._call("POST", _graph(f"/{page_id}/photos"),
+                              data={"published": "false", "access_token": token},
+                              files={"source": ("post.jpg", jpeg, "image/jpeg")})["id"]
+        images = self._call("GET", _graph(f"/{photo_id}"),
+                            params={"fields": "images", "access_token": token}).get("images") or []
+        if not images:
+            raise MetaError("facebook did not return a URL for the uploaded image")
+        return photo_id, max(images, key=lambda i: i.get("width", 0))["source"]
+
+    def delete_object(self, object_id: str, token: str) -> None:
+        try:
+            self._call("DELETE", _graph(f"/{object_id}"), params={"access_token": token})
+        except (MetaError, httpx.HTTPError):
+            pass
+
     def post_text(self, page_id: str, token: str, message: str) -> dict:
         return self._call("POST", _graph(f"/{page_id}/feed"), data={"message": message, "access_token": token})
 
@@ -207,23 +225,50 @@ class MetaProvider:
     def _instagram(self, token: str, p: PublishPayload) -> PublishResult:
         if not p.image or p.item_id is None:
             raise PermanentPublishError("إنستغرام يحتاج صورة؛ ولّد التصميم أولًا")
-        if not settings.public_base_url:
-            raise PermanentPublishError("PUBLIC_BASE_URL غير مضبوط: إنستغرام يجلب الصورة من رابط عام")
         self._check_ratio(p.image)
-        url = f"{settings.public_base_url.rstrip('/')}/api/v1/content-items/{p.item_id}/design/image?format=jpeg"
-        container = self.client.ig_create(self.conn.account_id, token, url, p.caption)
+        hosted = None
+        if settings.public_base_url:
+            url = f"{settings.public_base_url.rstrip('/')}/api/v1/content-items/{p.item_id}/design/image?format=jpeg"
+        else:
+            page_id = self._linked_page_id()
+            if not page_id:
+                raise PermanentPublishError("إنستغرام يحتاج رابطًا عامًا للصورة: اربط صفحة فيسبوك (أعد الربط بحساب Meta) أو اضبط PUBLIC_BASE_URL")
+            hosted, url = self.client.host_image(page_id, token, _to_jpeg(p.image))
+        try:
+            return self._ig_publish(token, url, p.caption)
+        finally:
+            if hosted:
+                self.client.delete_object(hosted, token)
+
+    def _linked_page_id(self) -> str | None:
+        fb = self.session.scalar(select(SocialConnection).where(
+            SocialConnection.project_id == self.conn.project_id, SocialConnection.platform == "facebook"))
+        return fb.account_id if fb else None
+
+    def _ig_publish(self, token: str, url: str, caption: str) -> PublishResult:
+        container = self.client.ig_create(self.conn.account_id, token, url, caption)
         deadline = time.monotonic() + self.ig_wait_s
         while True:
             status = self.client.ig_status(container, token)
             if status == "FINISHED":
                 break
             if status in ("ERROR", "EXPIRED"):
-                raise PermanentPublishError(f"إنستغرام رفض الصورة ({status}). تأكد أن الرابط عام وأن الأبعاد مقبولة")
+                raise PermanentPublishError(f"إنستغرام رفض الصورة ({status}). تأكد أن الأبعاد مقبولة")
             if time.monotonic() > deadline:
                 raise MetaError("instagram media processing timed out")
             time.sleep(1.5)
         media_id = self.client.ig_publish(self.conn.account_id, token, container)
         return PublishResult("published", media_id, self.client.ig_permalink(media_id, token))
+
+
+def _to_jpeg(image: bytes) -> bytes:
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.open(io.BytesIO(image)).convert("RGB").save(buf, "JPEG", quality=92)
+    return buf.getvalue()
 
 
 def provider_for(session: Session, project_id: uuid.UUID, platform: str) -> MetaProvider | None:

@@ -48,7 +48,9 @@ PUBLIC_BASE_URL=https://xxxx.trycloudflare.com
    ```
    META_SCOPES=pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish
    ```
-3. **الرابط العام للصور** (إنستغرام يجلب الصورة من الإنترنت): شغّل نفقًا مؤقتًا في نافذة PowerShell منفصلة، مثلًا:
+3. **الرابط العام للصور: لم يعد مطلوبًا.** إنستغرام يجلب الصورة من رابط عام، والنظام يرفعها تلقائيًا إلى صفحة
+   فيسبوك المرتبطة **كصورة غير منشورة** (لا تظهر على الصفحة)، ويعطي رابطها لإنستغرام، ثم يحذفها بعد النشر.
+   (اختياري، بديل قديم) يمكنك بدلًا من ذلك تشغيل نفق مؤقتًا في نافذة PowerShell منفصلة، مثلًا:
    ```
    cloudflared tunnel --url http://localhost:8000
    ```

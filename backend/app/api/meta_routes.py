@@ -34,7 +34,7 @@ def _configured() -> bool:
 def meta_status():
     return {"configured": _configured(), "redirect_uri": settings.meta_redirect_uri,
             "public_base_url_set": bool(settings.public_base_url),
-            "instagram_ready": _configured() and bool(settings.public_base_url)}
+            "instagram_ready": _configured()}  # without PUBLIC_BASE_URL images are hosted via the linked Page
 
 
 @router.get("/meta/connect")

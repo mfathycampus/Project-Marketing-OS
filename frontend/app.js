@@ -340,7 +340,7 @@ function Connections({ pid, query }) {
       ${c && html`<button class="danger" onClick=${async () => { await api(`/projects/${pid}/social-connections/${c.id}`, { method: "DELETE" }); reload(); }}>فصل</button>`}</li>`; })}</ul>
     ${byPlat.facebook && !byPlat.instagram && html`<p class="muted">إنستغرام غير متصل: تأكد أن لحساب إنستغرام (احترافي) ربطًا بصفحة فيسبوك، وأن صلاحيات إنستغرام مضافة في META_SCOPES، ثم أعد الربط.</p>`}
     ${status && status.configured && html`<p><a href=${`${API}/meta/connect?project_id=${pid}`}><button class="primary" type="button">${conns && conns.length ? "إعادة الربط بحساب Meta" : "ربط فيسبوك وإنستغرام"}</button></a></p>
-      ${!status.public_base_url_set ? html`<p class="muted">لنشر إنستغرام تلقائيًا اضبط PUBLIC_BASE_URL (رابط عام للخادم). فيسبوك لا يحتاجه.</p>`
+      ${!status.public_base_url_set ? html`<p class="muted">إنستغرام ينشر تلقائيًا عبر صفحة فيسبوك المرتبطة (تُرفع الصورة مؤقتًا كصورة غير منشورة ثم تُحذف).</p>`
         : html`<p><button type="button" onClick=${async () => { const r = await api("/meta/check-public-url"); toastSetter(r.ok ? "الرابط العام يعمل" : "الرابط العام غير متاح: " + r.detail, r.ok); }}>فحص الرابط العام</button></p>`}`}
     ${li && !li.configured && html`<p class="muted">لينكدإن: أضف LINKEDIN_CLIENT_ID و LINKEDIN_CLIENT_SECRET في .env (الدليل: docs/linkedin-setup-ar.md).</p>`}
     ${li && li.configured && html`<p><a href=${`${API}/linkedin/connect?project_id=${pid}`}><button class="primary" type="button">${byPlat.linkedin ? "إعادة ربط لينكدإن" : "ربط صفحة لينكدإن"}</button></a></p>`}

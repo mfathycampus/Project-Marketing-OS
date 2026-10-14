@@ -248,3 +248,45 @@ def test_lookup_helpers_survive_network_errors():
     c = fake_client(boom)
     assert c.granted_page_ids("T") == [] and c.page_by_id("1", "T") is None
     assert c.whoami("T") == {"name": "", "granted": [], "declined": []}
+
+
+def test_instagram_without_public_url_hosts_image_on_linked_page(session, monkeypatch):
+    from PIL import Image
+
+    from app.models import Project
+
+    monkeypatch.setattr(settings, "public_base_url", "")
+    project = Project(name="P")
+    session.add(project)
+    session.flush()
+    fb, ig = conn("facebook", "PAGE1"), conn("instagram", "IG1")
+    fb.project_id = ig.project_id = project.id
+    session.add_all([fb, ig])
+    session.flush()
+    png = io.BytesIO()
+    Image.new("RGB", (1080, 1080), "teal").save(png, "PNG")
+    calls = []
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        body = req.content
+        if req.url.path.endswith("/PAGE1/photos"):
+            assert b"published" in body and b"image/jpeg" in body
+            return httpx.Response(200, json={"id": "PH1"})
+        if req.method == "GET" and req.url.path.endswith("/PH1"):
+            return httpx.Response(200, json={"images": [{"width": 720, "source": "https://cdn/s.jpg"},
+                                                        {"width": 1080, "source": "https://cdn/big.jpg"}]})
+        if req.url.path.endswith("/IG1/media"):
+            assert "cdn%2Fbig.jpg" in body.decode() or "cdn/big.jpg" in body.decode()
+            return httpx.Response(200, json={"id": "CONT1"})
+        if req.url.path.endswith("/CONT1"):
+            return httpx.Response(200, json={"status_code": "FINISHED"})
+        if req.url.path.endswith("/IG1/media_publish"):
+            return httpx.Response(200, json={"id": "MEDIA1"})
+        if req.method == "DELETE":
+            return httpx.Response(200, json={"success": True})
+        return httpx.Response(200, json={"permalink": "https://instagram.com/p/x"})
+
+    out = meta.MetaProvider(ig, session, fake_client(handler)).publish(
+        PublishPayload("instagram", "h", "cap", "c", image=png.getvalue(), item_id=uuid.uuid4()))
+    assert out.status == "published" and ("DELETE", "/" + settings.meta_graph_version + "/PH1") in calls
