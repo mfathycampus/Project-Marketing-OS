@@ -44,4 +44,13 @@ button:disabled{opacity:.5;cursor:default}
 @keyframes s{to{transform:rotate(360deg)}}
 .list li{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
 .list{list-style:none;margin:0;padding:0}
+.scenes{padding-inline-start:22px;margin:12px 0}
+.scenes li{margin-bottom:12px}
+textarea.scene{min-height:56px;margin-bottom:6px}
+label.check{display:flex;gap:8px;align-items:center;color:var(--ink);margin:0}
+label.check input{width:auto}
+input[type=color]{padding:2px;height:40px;width:56px}
+.item video[style]{max-height:520px}
+.bar{height:6px;background:var(--line);border-radius:3px;margin-top:10px;overflow:hidden}
+.bar span{display:block;height:100%;background:var(--brand);transition:width .4s}
 @media (max-width:640px){.cal{gap:3px}.day{min-height:64px;padding:3px}}

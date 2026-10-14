@@ -7,6 +7,7 @@ from sqlalchemy.pool import StaticPool
 import os
 
 os.environ.setdefault("WORKER_ENABLED", "false")
+os.environ.setdefault("VOICE_PROVIDER", "off")  # no network voice in tests; voice tests opt in
 
 import app.models  # noqa: F401
 from app.ai.provider import FakeProvider

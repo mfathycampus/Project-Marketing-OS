@@ -455,6 +455,128 @@ function BrandBrain({ pid }) {
       </form></div>`;
 }
 
+/* ---------- Video studio: prompt -> script -> video -> export ---------- */
+const EMPTY_SCRIPT = { title: "", brand_name: "", scenes: [""], broll: [""], cta: "" };
+
+function Studio() {
+  const [opt] = useFetch("/studio/options");
+  const [videos, reload] = useFetch("/studio/videos");
+  const [prompt, setPrompt] = useState("");
+  const [aspect, setAspect] = useState("9:16");
+  const [length, setLength] = useState("medium");
+  const [script, setScript] = useState(null);
+  const [voice, setVoice] = useState(null);
+  const [captions, setCaptions] = useState(true);
+  const [footage, setFootage] = useState(true);
+  const [colors, setColors] = useState({ primary_color: "#0F766E", secondary_color: "#F59E0B" });
+  const [busy, setBusy] = useState("");
+
+  const working = (videos || []).some((v) => v.status === "queued" || v.status === "rendering");
+  useEffect(() => { if (!working) return; const t = setInterval(reload, 2000); return () => clearInterval(t); }, [working]);
+  if (!opt) return html`<${Busy} text="تحميل..." />`;
+  const curVoice = voice ?? (opt.voice_engine ? opt.default_voice : "");
+
+  const write = async (e) => {
+    e.preventDefault();
+    setBusy("script");
+    try { setScript(await api("/studio/script", { method: "POST", body: { prompt, aspect, length } })); } catch {} finally { setBusy(""); }
+  };
+  const setScene = (i, k, v) => setScript((s) => { const n = { ...s, [k]: [...s[k]] }; n[k][i] = v; return n; });
+  const addScene = () => setScript((s) => ({ ...s, scenes: [...s.scenes, ""], broll: [...s.broll, ""] }));
+  const delScene = (i) => setScript((s) => ({ ...s, scenes: s.scenes.filter((_, j) => j !== i), broll: s.broll.filter((_, j) => j !== i) }));
+  const make = async () => {
+    setBusy("video");
+    try {
+      await api("/studio/videos", { method: "POST", body: { ...script, title: script.title || prompt.slice(0, 50) || "فيديو", aspect, voice: curVoice, captions, footage, ...colors } });
+      toastSetter("بدأ إنشاء الفيديو — يظهر التقدم بالأسفل", true);
+      reload();
+    } catch {} finally { setBusy(""); }
+  };
+
+  return html`<h1>استوديو الفيديو</h1>
+    <form class="card" onSubmit=${write}>
+      <h2>١. اوصف الفيديو</h2>
+      <div class="field"><label>اكتب فكرتك بالعربي أو بالإنجليزي</label>
+        <textarea required value=${prompt} onInput=${(e) => setPrompt(e.target.value)} placeholder="مثال: فيديو إعلاني لمحل قهوة اسمه المذاق، بنقدم قهوة مختصة محمصة طازة يوميًا، العرض: كوب مجاني مع أول طلب"></textarea></div>
+      <div class="row" style="margin-top:12px">
+        <div class="field"><label>المقاس</label><select value=${aspect} onChange=${(e) => setAspect(e.target.value)}>${Object.entries(opt.aspects).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>
+        <div class="field"><label>المدة</label><select value=${length} onChange=${(e) => setLength(e.target.value)}>${Object.entries(opt.lengths).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>
+        <button class="primary" disabled=${busy || !opt.ai_ready}>${busy === "script" ? html`<${Busy} text="Claude يكتب السيناريو..." />` : "اكتب السيناريو بالذكاء الاصطناعي"}</button>
+        <button type="button" onClick=${() => setScript(script || EMPTY_SCRIPT)}>سأكتب المشاهد بنفسي</button>
+      </div>
+      ${!opt.ai_ready && html`<p class="muted">مفتاح Anthropic غير مضبوط، فاكتب المشاهد بنفسك.</p>`}
+    </form>
+
+    ${script && html`<div class="card">
+      <h2>٢. راجع السيناريو</h2>
+      <div class="row">
+        <div class="field"><label>اسم الفيديو</label><input value=${script.title} onInput=${(e) => setScript({ ...script, title: e.target.value })} /></div>
+        <div class="field"><label>اسم العلامة (يظهر أعلى الفيديو)</label><input value=${script.brand_name} onInput=${(e) => setScript({ ...script, brand_name: e.target.value })} /></div>
+      </div>
+      <ol class="scenes">${script.scenes.map((sc, i) => html`<li>
+        <textarea class="scene" value=${sc} maxlength="200" onInput=${(e) => setScene(i, "scenes", e.target.value)} placeholder="نص المشهد (يُقال بالصوت ويظهر على الشاشة)"></textarea>
+        <div class="row">
+          <div class="field"><input dir="ltr" value=${script.broll[i] || ""} onInput=${(e) => setScene(i, "broll", e.target.value)} placeholder="stock footage search (English)" title="كلمات البحث عن لقطة الخلفية" /></div>
+          ${script.scenes.length > 1 && html`<button type="button" class="danger" onClick=${() => delScene(i)}>حذف</button>`}
+        </div></li>`)}</ol>
+      ${script.scenes.length < 12 && html`<button type="button" onClick=${addScene}>+ مشهد</button>`}
+      <div class="row" style="margin-top:12px">
+        <div class="field"><label>الدعوة لاتخاذ إجراء (آخر مشهد)</label><input value=${script.cta} onInput=${(e) => setScript({ ...script, cta: e.target.value })} placeholder="اطلب الآن" /></div>
+        <div class="field"><label>التعليق الصوتي</label><select value=${curVoice} onChange=${(e) => setVoice(e.target.value)}>
+          <option value="">بدون صوت</option>
+          ${opt.voice_engine && Object.entries(opt.voices).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>
+        <div class="field" style="flex:0 0 auto"><label>لون أساسي</label><input type="color" value=${colors.primary_color} onInput=${(e) => setColors({ ...colors, primary_color: e.target.value })} /></div>
+        <div class="field" style="flex:0 0 auto"><label>لون التمييز</label><input type="color" value=${colors.secondary_color} onInput=${(e) => setColors({ ...colors, secondary_color: e.target.value })} /></div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="check"><input type="checkbox" checked=${captions} onChange=${(e) => setCaptions(e.target.checked)} /> ترجمة متزامنة مع الصوت (الكلمة المنطوقة مميزة)</label>
+        <label class="check"><input type="checkbox" checked=${footage} disabled=${!opt.footage} onChange=${(e) => setFootage(e.target.checked)} /> لقطات خلفية ${opt.footage ? `من ${opt.footage}` : "(غير مفعّلة — شغّل set-pixabay.bat)"}</label>
+      </div>
+      ${!opt.voice_engine && html`<p class="muted">الصوت غير متاح: شغّل start.bat لتثبيت edge-tts.</p>`}
+      <div class="actions" style="margin-top:12px"><button class="primary" disabled=${busy || !script.scenes.some((s) => s.trim())} onClick=${make}>${busy === "video" ? html`<${Busy} text="جارٍ البدء..." />` : "٣. أنشئ الفيديو"}</button></div>
+    </div>`}
+
+    <h2>فيديوهاتي</h2>
+    ${videos === null ? html`<${Busy} text="تحميل..." />` : videos.length === 0 ? html`<p class="muted">لا توجد فيديوهات بعد.</p>` : html`
+      <div class="grid">${videos.map((v) => html`<${StudioCard} key=${v.id} v=${v} opt=${opt} reload=${reload} />`)}</div>`}`;
+}
+
+function StudioCard({ v, opt, reload }) {
+  const [fmt, setFmt] = useState("mp4");
+  const [quality, setQuality] = useState("1080p");
+  const [exporting, setExporting] = useState(false);
+  const del = async () => { if (confirm("حذف هذا الفيديو وكل صيغه المصدّرة؟")) { await api(`/studio/videos/${v.id}`, { method: "DELETE" }); reload(); } };
+  const download = async () => {
+    setExporting(true);
+    try {
+      const res = await fetch(`${API}/studio/videos/${v.id}/export?format=${fmt}&quality=${quality}`);
+      if (!res.ok) { let d = res.statusText; try { d = (await res.json()).detail; } catch {} toastSetter(d); return; }
+      const name = decodeURIComponent((res.headers.get("content-disposition") || "").match(/filename\*=utf-8''([^;]+)/i)?.[1] || `video.${fmt}`);
+      const url = URL.createObjectURL(await res.blob());
+      const a = Object.assign(document.createElement("a"), { href: url, download: name });
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } finally { setExporting(false); }
+  };
+  const ratio = v.width && v.height ? `${v.width}/${v.height}` : "9/16";
+  return html`<div class="card item">
+    ${v.status === "ready" ? html`<video controls preload="metadata" style=${{ aspectRatio: ratio }} src=${`${API}/studio/videos/${v.id}/preview`}></video>`
+      : v.status === "failed" ? html`<div class="ph error">${v.error || "فشل الإنشاء"}</div>`
+      : html`<div class="ph"><div style="width:100%"><${Busy} text=${v.status === "queued" ? "في الانتظار..." : `جارٍ الإنشاء ${Math.round((v.progress || 0) * 100)}%`} />
+          <div class="bar"><span style=${{ width: `${Math.round((v.progress || 0) * 100)}%` }}></span></div></div></div>`}
+    <h3>${v.title}</h3>
+    <p>${v.spec.aspect}${v.duration_ms ? ` · ${(v.duration_ms / 1000).toFixed(1)} ث` : ""}${v.spec.voice ? ` · ${opt.voices[v.spec.voice] || v.spec.voice}` : " · بدون صوت"}</p>
+    ${v.status === "ready" && html`<div class="row" style="margin-bottom:10px">
+      <div class="field"><label>الصيغة</label><select value=${fmt} onChange=${(e) => setFmt(e.target.value)}>${Object.entries(opt.formats).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>
+      ${fmt !== "srt" && html`<div class="field"><label>الجودة</label><select value=${quality} onChange=${(e) => setQuality(e.target.value)}>${Object.entries(opt.qualities).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>`}
+    </div>`}
+    <div class="actions">
+      ${v.status === "ready" && html`<button class="primary" disabled=${exporting} onClick=${download}>${exporting ? html`<${Busy} text="جارٍ التصدير..." />` : "تنزيل"}</button>`}
+      ${v.status !== "queued" && v.status !== "rendering" && html`<button class="danger" onClick=${del}>حذف</button>`}
+    </div>
+  </div>`;
+}
+
 /* ---------- App ---------- */
 function App() {
   const parts = useHash();
@@ -463,8 +585,9 @@ function App() {
   toastSetter = (m, ok = false) => { setToast({ m, ok }); clearTimeout(timer.current); timer.current = setTimeout(() => setToast(null), 6000); };
   let view;
   if (parts[0] === "p" && parts[1]) view = parts[2] === "c" && parts[3] ? html`<${CampaignPage} pid=${parts[1]} cid=${parts[3]} />` : html`<${Project} id=${parts[1]} tab=${parts[2]} key=${parts[1]} />`;
+  else if (parts[0] === "studio") view = html`<${Studio} />`;
   else view = html`<${Projects} />`;
-  return html`<header><a href="#/">Marketing OS</a><span class="sp"></span><a href="/docs" class="muted" style="font-weight:400">API</a></header>
+  return html`<header><a href="#/">Marketing OS</a><a href="#/studio">استوديو الفيديو</a><span class="sp"></span><a href="/docs" class="muted" style="font-weight:400">API</a></header>
     <main>${view}</main>${toast && html`<div class=${"toast" + (toast.ok ? " ok" : "")} onClick=${() => setToast(null)}>${toast.m}</div>`}`;
 }
 

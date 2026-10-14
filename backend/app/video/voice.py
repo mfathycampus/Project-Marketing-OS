@@ -8,9 +8,9 @@
 Every provider returns a 24 kHz mono 16-bit WAV, cached by (provider, voice, rate, text), one clip per scene, so a
 scene lasts exactly as long as its narration and the on-screen text doubles as the caption.
 """
-import asyncio
 import hashlib
 import io
+import json
 import subprocess
 import tempfile
 import wave
@@ -73,7 +73,7 @@ def synthesize(text: str, voice: str | None = None, http: httpx.Client | None = 
     voice = voice or current_voice() or f"azure:{settings.tts_voice}"
     prov, _, name = voice.partition(":") if ":" in voice else ("azure", "", voice)
     storage = storage or LocalStorage()
-    key = "tts/" + hashlib.sha256(f"{prov}|{name}|{settings.tts_rate}|{text}".encode()).hexdigest() + ".wav"
+    key = _key(prov, name, text)
     try:
         return storage.get(key)
     except OSError:
@@ -81,7 +81,8 @@ def synthesize(text: str, voice: str | None = None, http: httpx.Client | None = 
     if prov == "elevenlabs":
         data = _elevenlabs(text, name, http)
     elif prov == "edge":
-        data = _edge(text, name)
+        data, words = _edge(text, name)
+        storage.put(key + ".words.json", json.dumps(words, ensure_ascii=False).encode("utf-8"))
     else:
         data = _azure(text, name, http)
     storage.put(key, data)
@@ -137,18 +138,67 @@ def _elevenlabs(text: str, voice_id: str, http: httpx.Client | None) -> bytes:
     return _pcm_to_wav(r.content)
 
 
-def _edge(text: str, voice: str) -> bytes:
+def _edge(text: str, voice: str) -> tuple[bytes, list[list]]:
+    """(WAV, [[start_s, end_s, word], ...]): Edge also reports when each word is spoken (synced captions)."""
     try:
         import edge_tts
     except ImportError as exc:
         raise VoiceError("حزمة edge-tts غير مثبتة: شغّل start.bat (أو python -m pip install edge-tts)") from exc
+    audio, words = bytearray(), []
+    try:
+        comm = edge_tts.Communicate(text, voice, rate=settings.tts_rate, boundary="WordBoundary")
+        for chunk in comm.stream_sync():
+            if chunk["type"] == "audio":
+                audio += chunk["data"]
+            elif chunk["type"] == "WordBoundary":  # offsets are in 100 ns ticks
+                start = chunk["offset"] / 1e7
+                words.append([round(start, 3), round(start + chunk["duration"] / 1e7, 3), chunk["text"]])
+    except Exception as exc:  # noqa: BLE001 - unofficial service: report, never crash the video
+        raise VoiceError(f"خدمة edge-tts المجانية لم تستجب ({type(exc).__name__}): {str(exc)[:160]}") from exc
+    if not audio:
+        raise VoiceError(f"خدمة edge-tts لم ترجع صوتًا للصوت {voice}")
     with tempfile.TemporaryDirectory() as tmp:
         mp3 = Path(tmp) / "v.mp3"
-        try:
-            asyncio.run(edge_tts.Communicate(text, voice, rate=settings.tts_rate).save(str(mp3)))
-        except Exception as exc:  # noqa: BLE001 - unofficial service: report, never crash the video
-            raise VoiceError(f"خدمة edge-tts المجانية لم تستجب ({type(exc).__name__}): {str(exc)[:160]}") from exc
-        return _to_wav(mp3)
+        mp3.write_bytes(bytes(audio))
+        return _to_wav(mp3), words
+
+
+def _key(prov: str, name: str, text: str) -> str:
+    return "tts/" + hashlib.sha256(f"{prov}|{name}|{settings.tts_rate}|{text}".encode()).hexdigest() + ".wav"
+
+
+def word_times(text: str, voice: str, seconds: float, storage: LocalStorage | None = None) -> list[tuple[float, float, str]]:
+    """When each on-screen word of `text` is spoken within its clip. Real timings from Edge when cached; otherwise
+    the clip's duration is spread over the words by length (Azure REST and ElevenLabs return none here)."""
+    tokens = text.split()
+    if not tokens:
+        return []
+    prov, _, name = voice.partition(":") if ":" in voice else ("azure", "", voice)
+    spoken = []
+    try:
+        spoken = json.loads((storage or LocalStorage()).get(_key(prov, name, text) + ".words.json").decode("utf-8"))
+    except (OSError, ValueError):
+        pass
+    if spoken:  # the voice may split/merge tokens (numbers, punctuation): map each on-screen word proportionally
+        n, m = len(tokens), len(spoken)
+        return [(float(spoken[min(m - 1, i * m // n)][0]), float(spoken[min(m - 1, max(i * m // n, (i + 1) * m // n - 1))][1]), tok)
+                for i, tok in enumerate(tokens)]
+    weights = [len(t) + 2 for t in tokens]
+    total, at, out = sum(weights), 0.0, []
+    for tok, wgt in zip(tokens, weights):
+        out.append((at, at + seconds * wgt / total, tok))
+        at += seconds * wgt / total
+    return out
+
+
+# Arabic voices of the Microsoft catalogue (Edge and Azure share it)
+VOICES = {
+    "ar-EG-SalmaNeural": "سلمى (مصري)", "ar-EG-ShakirNeural": "شاكر (مصري)",
+    "ar-SA-HamedNeural": "حامد (سعودي)", "ar-SA-ZariyahNeural": "زارية (سعودية)",
+    "ar-AE-FatimaNeural": "فاطمة (إماراتي)", "ar-AE-HamdanNeural": "حمدان (إماراتي)",
+    "ar-KW-FahedNeural": "فهد (كويتي)", "ar-KW-NouraNeural": "نورة (كويتية)",
+    "ar-JO-SanaNeural": "سناء (أردني)", "ar-JO-TaimNeural": "تيم (أردني)",
+}
 
 
 # ---------- audio helpers ----------

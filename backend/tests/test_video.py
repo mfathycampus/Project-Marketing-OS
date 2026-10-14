@@ -293,12 +293,13 @@ def test_edge_voice_converts_mp3_to_wav(monkeypatch, tmp_path):
     from app.video import voice
 
     class Communicate:
-        def __init__(self, text, v, rate="+0%"):
-            assert v == "ar-SA-ZariyahNeural" and rate == settings.tts_rate
+        def __init__(self, text, v, rate="+0%", boundary="SentenceBoundary"):
+            assert v == "ar-SA-ZariyahNeural" and rate == settings.tts_rate and boundary == "WordBoundary"
 
-        async def save(self, path):
-            subprocess.run([renderer.ffmpeg_exe(), "-v", "error", "-f", "lavfi", "-i",
-                            "sine=frequency=300:duration=1.5", path], check=True)
+        def stream_sync(self):
+            yield {"type": "audio", "data": subprocess.run(
+                [renderer.ffmpeg_exe(), "-v", "error", "-f", "lavfi", "-i", "sine=frequency=300:duration=1.5",
+                 "-f", "mp3", "-"], capture_output=True, check=True).stdout}
 
     monkeypatch.setitem(sys.modules, "edge_tts", types.SimpleNamespace(Communicate=Communicate))
     wav = voice.synthesize("نص", "edge:ar-SA-ZariyahNeural", storage=LocalStorage(str(tmp_path)))
