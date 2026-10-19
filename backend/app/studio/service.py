@@ -24,10 +24,11 @@ from app.config import settings
 from app.media.library import describe_for_ai, get_library
 from app.storage.local import LocalStorage
 from app.video import broll, voice
+from app.video.themes import THEMES
 from app.video.renderer import SIZES, VideoRenderer, VideoRequest, ffmpeg_exe
 
 log = logging.getLogger("studio")
-PROMPT = Path(__file__).resolve().parents[1] / "ai" / "prompts" / "studio.v3.md"
+PROMPT = Path(__file__).resolve().parents[1] / "ai" / "prompts" / "studio.v4.md"
 LENGTHS = {"short": 4, "medium": 6, "long": 10}  # scene counts for ~15 / ~30 / ~60 seconds
 MAX_SCENES = 12
 
@@ -65,6 +66,9 @@ class StudioScript(BaseModel):
     stats: list[str] = Field(default_factory=list, description=(
         "Per scene, same order and count as scenes: an animated statistic 'value|label' (e.g. '5|ساعات توفرها أسبوعيًا')"
         " using ONLY numbers the user gave, or an empty string"))
+    compare: list[str] = Field(default_factory=list, description=(
+        "Per scene, same order and count as scenes: a before/after contrast 'before|after' (a few words each) for at "
+        "most ONE scene, or an empty string"))
 
 
 def write_script(llm: LLMProvider, prompt: str, aspect: str, length: str) -> dict:
@@ -86,7 +90,8 @@ def write_script(llm: LLMProvider, prompt: str, aspect: str, length: str) -> dic
     return {"title": data.title.strip()[:80], "brand_name": data.brand_name.strip(), "scenes": scenes,
             "broll": terms + [""] * (len(scenes) - len(terms)), "cta": data.cta.strip(),
             "media": media + [""] * (len(scenes) - len(media)),
-            "stats": ([x.strip() for x in data.stats] + [""] * len(scenes))[: len(scenes)]}
+            "stats": ([x.strip() for x in data.stats] + [""] * len(scenes))[: len(scenes)],
+            "compare": ([x.strip() for x in data.compare] + [""] * len(scenes))[: len(scenes)]}
 
 
 class VideoSpec(BaseModel):
@@ -96,6 +101,8 @@ class VideoSpec(BaseModel):
     media: list[str] = Field(default_factory=list, max_length=MAX_SCENES)  # media-library id per scene ('' = none)
     stats: list[str] = Field(default_factory=list, max_length=MAX_SCENES)  # "value|label" per scene ('' = none)
     logo: str = ""  # media-library image id of the brand logo
+    compare: list[str] = Field(default_factory=list, max_length=MAX_SCENES)  # "before|after" per scene ('' = none)
+    style: str = "modern"  # ready-made look (app/video/themes.py)
     cta: str = Field(default="", max_length=80)
     brand_name: str = Field(default="", max_length=80)
     aspect: str = "9:16"
@@ -211,7 +218,8 @@ class Studio:
                 secondary_color=spec.secondary_color, aspect=spec.aspect, music_seed=vid, voice=spec.voice,
                 broll=terms, captions=spec.captions,
                 media=[get_library().resolve(m) or "" for m in spec.media], stats=spec.stats,
-                logo=get_library().resolve(spec.logo) or ""), on_progress=progress)
+                logo=get_library().resolve(spec.logo) or "", style=spec.style, compare=spec.compare,
+                media_focus=[get_library().focus_of(m) for m in spec.media]), on_progress=progress)
             self.storage.put(f"studio/{vid}/master.mp4", res.mp4)
             self.storage.put(f"studio/{vid}/captions.srt", res.srt().encode("utf-8"))
             meta.update(status="ready", progress=1.0, width=res.width, height=res.height, duration_ms=res.duration_ms)
@@ -285,6 +293,7 @@ def options() -> dict:
         "lengths": {"short": "قصير (~15 ثانية)", "medium": "متوسط (~30 ثانية)", "long": "طويل (~60 ثانية)"},
         **_voices(),
         "footage": broll.provider_name(),
+        "styles": {k: v["label"] for k, v in THEMES.items()},
         "ai_ready": settings.ai_provider == "fake" or bool(settings.anthropic_api_key),
         "formats": FORMATS,
         "qualities": {k: v["label"] for k, v in QUALITIES.items()},

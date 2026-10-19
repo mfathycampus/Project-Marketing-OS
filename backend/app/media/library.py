@@ -110,11 +110,29 @@ class MediaLibrary:
         self._save(meta)
         return meta
 
-    def update(self, mid: str, description: str) -> dict:
+    def update(self, mid: str, description: str | None = None, focus=None, clear_focus: bool = False) -> dict:
+        """focus = (x, y) in 0..1 of the image/video: where the video points, taps and zooms."""
         meta = self.get(mid)
-        meta["description"] = description.strip()[:300]
+        if description is not None:
+            meta["description"] = description.strip()[:300]
+        if clear_focus:
+            meta["focus"] = None
+        elif focus is not None:
+            x, y = (float(v) for v in focus)
+            if not (0 <= x <= 1 and 0 <= y <= 1):
+                raise MediaError("نقطة التركيز يجب أن تكون داخل الصورة")
+            meta["focus"] = [round(x, 4), round(y, 4)]
         self._save(meta)
         return meta
+
+    def focus_of(self, mid: str | None):
+        if not mid:
+            return None
+        try:
+            f = self.get(mid).get("focus")
+        except LookupError:
+            return None
+        return tuple(f) if f else None
 
     def delete(self, mid: str) -> None:
         d = self._dir(mid)

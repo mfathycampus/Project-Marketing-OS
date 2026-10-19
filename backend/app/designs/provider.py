@@ -12,6 +12,7 @@ class DesignRequest:
     rtl: bool = True
     idempotency_key: str = ""
     logo: str = ""  # path of the brand logo (used by videos)
+    video_style: str = "modern"  # brand's ready-made video look
 
 
 @dataclass

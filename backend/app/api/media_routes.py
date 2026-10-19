@@ -8,7 +8,9 @@ router = APIRouter(prefix="/media")
 
 
 class MediaPatch(BaseModel):
-    description: str = Field(default="", max_length=300)
+    description: str | None = Field(default=None, max_length=300)
+    focus: list[float] | None = Field(default=None, min_length=2, max_length=2)  # [x, y] in 0..1
+    clear_focus: bool = False
 
 
 @router.get("")
@@ -27,9 +29,11 @@ async def upload(file: UploadFile = File(...), description: str = Form(""), lib:
 @router.patch("/{mid}")
 def update(mid: str, body: MediaPatch, lib: MediaLibrary = Depends(get_library)):
     try:
-        return lib.update(mid, body.description)
+        return lib.update(mid, body.description, body.focus, body.clear_focus)
     except LookupError as exc:
         raise HTTPException(404, "media not found") from exc
+    except MediaError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.delete("/{mid}", status_code=204)

@@ -37,7 +37,7 @@ class AIOrchestrator:
         if project is None:
             raise LookupError("project not found")
 
-        instructions, prompt_version = _load_prompt("campaign.v5")
+        instructions, prompt_version = _load_prompt("campaign.v6")
         ctx = build_campaign_context(self.session, project, req.brief)
         forbidden = [r.text.lower() for r in project.rules if r.kind == "forbidden_word"]
         user_message = (

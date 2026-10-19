@@ -44,6 +44,10 @@ class DesignSpec(BaseModel):
         default_factory=list,
         description="Only when media_type is video: per video scene an animated statistic 'value|label' "
                     "(e.g. '5|ساعات توفرها أسبوعيًا') using ONLY numbers present in the context, or an empty string.")
+    video_compare: list[str] = Field(
+        default_factory=list,
+        description="Only when media_type is video: per video scene a before/after contrast 'before|after' "
+                    "(e.g. 'تفريغ يدوي لساعات|مستند جاهز في دقيقة') for at most one scene, or an empty string.")
 
     @field_validator("fields", mode="before")
     @classmethod
