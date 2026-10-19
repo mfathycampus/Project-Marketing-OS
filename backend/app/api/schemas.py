@@ -122,6 +122,7 @@ class ContentPatch(BaseModel):
     media_type: Literal["image", "video"] | None = None
     video_scenes: list[str] | None = Field(default=None, max_length=6)  # on-screen lines (stored in design)
     video_broll: list[str] | None = Field(default=None, max_length=6)  # English Pexels search terms per scene
+    video_media: list[str] | None = Field(default=None, max_length=6)  # media-library id per scene ('' = none)
 
 
 class RejectIn(BaseModel):

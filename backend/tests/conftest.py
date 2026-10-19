@@ -46,3 +46,14 @@ def client(engine, fake_llm):
     app.dependency_overrides[get_llm] = lambda: fake_llm
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def isolated_media_library(tmp_path, monkeypatch):
+    """Every test gets an empty media library in its own temp folder (never the real one)."""
+    from app.media import library
+    from app.storage.local import LocalStorage
+
+    lib = library.MediaLibrary(LocalStorage(str(tmp_path / "media-store")))
+    monkeypatch.setattr(library, "_lib", lib)
+    return lib

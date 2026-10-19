@@ -36,6 +36,10 @@ class DesignSpec(BaseModel):
         default_factory=list,
         description="Only when media_type is video: one ENGLISH stock-footage search term (2-4 concrete visual words, "
                     "e.g. 'woman typing laptop office') per video scene, same order as video_scenes.")
+    video_media: list[str] = Field(
+        default_factory=list,
+        description="Only when media_type is video and <media_library> is given: per video scene the id of the "
+                    "library item (app screenshot/recording) that shows what the scene says, or an empty string.")
 
     @field_validator("fields", mode="before")
     @classmethod

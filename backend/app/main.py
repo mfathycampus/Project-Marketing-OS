@@ -13,6 +13,7 @@ from app.api.meta_routes import router as meta_router
 from app.api.publishing_routes import router as publishing_router
 from app.api.routes import router
 from app.api.studio_routes import router as studio_router
+from app.api.media_routes import router as media_router
 from app.config import settings
 from app.designs.worker import DesignWorker
 from app.publishing.worker import PublishingWorker
@@ -38,6 +39,7 @@ app.include_router(publishing_router, prefix="/api/v1")
 app.include_router(meta_router, prefix="/api/v1")
 app.include_router(linkedin_router, prefix="/api/v1")
 app.include_router(studio_router, prefix="/api/v1")
+app.include_router(media_router, prefix="/api/v1")
 
 
 @app.get("/health")

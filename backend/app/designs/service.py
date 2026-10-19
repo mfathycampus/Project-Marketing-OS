@@ -12,6 +12,7 @@ from app.designs.registry import REGISTRY, DesignSpecError, build_values
 from app.models import ContentItem, DesignAsset, DesignJob, Project, VideoAsset
 from app.storage.local import LocalStorage
 from app.config import settings
+from app.media.library import get_library
 from app.video import broll, voice
 from app.video.renderer import PLATFORM_ASPECT, VideoRenderer, VideoRequest, scenes_for
 
@@ -52,7 +53,8 @@ class DesignService:
         return VideoRequest(scenes=scenes, cta=item.cta, brand_name=req.brand_name, primary_color=req.primary_color,
                             secondary_color=req.secondary_color, aspect=PLATFORM_ASPECT.get(item.platform, "9:16"),
                             music_seed=str(item.id), voice=voice.current_voice(),
-                            broll=[q for q in item.design.get("video_broll") or [] if q.strip()] if broll.enabled() else [])
+                            broll=[q for q in item.design.get("video_broll") or [] if q.strip()] if broll.enabled() else [],
+                            media=[get_library().resolve(m) or "" for m in item.design.get("video_media") or []])
 
     def enqueue(self, item_id: uuid.UUID) -> DesignJob:
         """Create (or reuse) a design job and mark the item DESIGN_PENDING. Rendering happens in run_job."""

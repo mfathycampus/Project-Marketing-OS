@@ -11,6 +11,7 @@ from app.ai.context import build_campaign_context
 from app.ai.provider import LLMProvider, LLMRequest, LLMResult
 from app.ai.schemas import (CAPTION_LIMITS, VIDEO_SCENE_MAX, VIDEO_SCENES_MAX, AdaptOut, CampaignOut,
                             CampaignRequest)
+from app.media.library import describe_for_ai, get_library
 from app.models import AIRun, Campaign, ContentItem, ContentVariant, Project
 
 PROMPTS = Path(__file__).parent / "prompts"
@@ -36,7 +37,7 @@ class AIOrchestrator:
         if project is None:
             raise LookupError("project not found")
 
-        instructions, prompt_version = _load_prompt("campaign.v3")
+        instructions, prompt_version = _load_prompt("campaign.v4")
         ctx = build_campaign_context(self.session, project, req.brief)
         forbidden = [r.text.lower() for r in project.rules if r.kind == "forbidden_word"]
         user_message = (
@@ -47,6 +48,10 @@ class AIOrchestrator:
             f"tone: {req.tone or 'per brand'}\nbrief: {req.brief}\n"
             f"allowed_template_keys: {', '.join(ALLOWED_TEMPLATES)}\n</request>"
         )
+        library = get_library().list() if req.video_count else []
+        if library:
+            user_message += f"\n\n<media_library>\n{describe_for_ai(library)}\n</media_library>"
+        known_media = {m["id"] for m in library}
         llm_req = LLMRequest(
             instructions=instructions,
             stable_context=ctx.stable,
@@ -80,7 +85,8 @@ class AIOrchestrator:
                     headline=item.headline,
                     caption=item.caption,
                     cta=item.cta,
-                    design=item.design.model_dump(),
+                    design={**item.design.model_dump(),
+                            "video_media": [m if m in known_media else "" for m in item.design.video_media]},
                     media_type=item.media_type,
                 )
             )

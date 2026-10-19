@@ -52,6 +52,7 @@ class VideoRequest:
     voice: str = ""  # "provider:voice" (e.g. edge:ar-EG-SalmaNeural, elevenlabs:<id>); empty = no narration
     broll: list[str] = field(default_factory=list)  # Pexels search term per scene; empty = brand gradient
     captions: bool = True  # with narration: words appear in short groups synced to the voice, spoken word highlighted
+    media: list[str] = field(default_factory=list)  # per scene: path of an app screenshot/recording ('' = none)
 
 
 @dataclass
@@ -118,6 +119,108 @@ def _scene_seconds(text: str) -> float:
     return max(2.6, min(5.0, 1.8 + 0.05 * len(text)))
 
 
+TRANSITION = 0.3  # seconds of zoom-through crossfade at each scene change
+
+
+def _mix(a, b, k: float):
+    return tuple(int(x + (y - x) * k) for x, y in zip(a, b))
+
+
+def _ease_back(t: float) -> float:
+    """Ease-out with a small overshoot (spring feel) for the phone entrance."""
+    t = max(0.0, min(1.0, t))
+    c = 1.4
+    return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2
+
+
+def _phone_layout(w: int, h: int, margin: int, rtl: bool) -> dict:
+    """Where the phone mockup and the text go when a scene shows app media.
+    Tall frames: text on top, phone below. Square/wide frames: phone on one side, text on the other."""
+    if h >= w * 1.5:  # 9:16
+        pw = int(w * 0.56)
+        ph = int(pw * 2.05)
+        px, py = (w - pw) // 2, h - ph - 110
+        text = (w // 2, (margin + 40 + py) // 2, w - 2 * margin, py - margin - 60)
+    elif h > w:  # 4:5
+        pw = int(w * 0.40)
+        ph = int(pw * 2.05)
+        px, py = (w - pw) // 2, h - ph - 60
+        text = (w // 2, (margin + py) // 2 + 10, w - 2 * margin, py - margin - 30)
+    else:  # 1:1 and 16:9: side by side (RTL reads right to left, so the text sits on the right)
+        ph = int(h * 0.84)
+        pw = int(ph / 2.05)
+        py = (h - ph) // 2 + 10
+        px = int(w * 0.09) if rtl else w - int(w * 0.09) - pw
+        x0, x1 = (px + pw + 70, w - margin) if rtl else (margin, px - 70)
+        text = ((x0 + x1) // 2, h // 2, x1 - x0, h - 2 * margin)
+    return {"phone": (px, py, pw, ph), "text": text}
+
+
+class _Phone:
+    """App screenshot or screen recording inside a phone mockup. Screenshots taller than the screen scroll
+    slowly (like someone browsing the app); others zoom in gently. Recordings play inside the screen."""
+
+    def __init__(self, path: str, geo: dict, seconds: float):
+        self.px, self.py, self.pw, self.ph = geo["phone"]
+        bezel = max(10, self.pw // 34)
+        self.sw, self.sh = self.pw - 2 * bezel, self.ph - 2 * bezel
+        self.bezel, self.seconds = bezel, seconds
+        r_out, r_in = int(self.pw * 0.14), int(self.pw * 0.12)
+        pad = 60  # room for the shadow
+        self.pad = pad
+        body = Image.new("RGBA", (self.pw + 2 * pad, self.ph + 2 * pad), (0, 0, 0, 0))
+        sh = Image.new("L", body.size, 0)
+        ImageDraw.Draw(sh).rounded_rectangle((pad + 10, pad + 30, pad + self.pw - 10, pad + self.ph + 10), r_out, fill=150)
+        body.putalpha(sh.filter(ImageFilter.GaussianBlur(28)))
+        d = ImageDraw.Draw(body)
+        d.rounded_rectangle((pad, pad, pad + self.pw, pad + self.ph), r_out, fill=(18, 20, 24, 255),
+                            outline=(70, 74, 82, 255), width=3)
+        self.body = body
+        self.mask = Image.new("L", (self.sw, self.sh), 0)
+        ImageDraw.Draw(self.mask).rounded_rectangle((0, 0, self.sw - 1, self.sh - 1), r_in, fill=255)
+        iw = int(self.sw * 0.30)  # dynamic-island pill
+        self.island = (pad + bezel + (self.sw - iw) // 2, pad + bezel + int(self.sh * 0.018), iw, int(self.sw * 0.075))
+        self.reader, self.still = None, None
+        if Path(path).suffix.lower() in (".mp4", ".mov", ".m4v", ".webm", ".mkv"):
+            self.reader = _ClipReader(Path(path), self.sw, self.sh, seconds)
+        else:
+            with Image.open(path) as im:
+                im = im.convert("RGB")
+                k = self.sw / im.width
+                if im.height * k < self.sh:  # short/wide image: cover the screen
+                    k = self.sh / im.height
+                self.still = im.resize((max(self.sw, int(im.width * k)), max(self.sh, int(im.height * k))), Image.LANCZOS)
+
+    def _screen(self, t: float) -> Image.Image:
+        if self.reader is not None:
+            shot = self.reader.next()
+            return shot if shot is not None else Image.new("RGB", (self.sw, self.sh), (0, 0, 0))
+        im, p = self.still, max(0.0, min(1.0, (t - 0.4) / max(0.1, self.seconds - 0.8)))
+        p = p * p * (3 - 2 * p)  # smoothstep
+        x0 = (im.width - self.sw) // 2
+        if im.height - self.sh > self.sh * 0.15:  # tall screenshot: scroll down through it
+            y0 = int((im.height - self.sh) * p * 0.85)
+            return im.crop((x0, y0, x0 + self.sw, y0 + self.sh))
+        z = 1 + 0.08 * p  # otherwise a slow push-in
+        cw, ch = int(self.sw / z), int(self.sh / z)
+        cx, cy = im.width // 2, im.height // 2
+        return im.crop((cx - cw // 2, cy - ch // 2, cx - cw // 2 + cw, cy - ch // 2 + ch)).resize((self.sw, self.sh), Image.BILINEAR)
+
+    def render(self, t: float, enters: bool):
+        img = self.body.copy()
+        img.paste(self._screen(t), (self.pad + self.bezel, self.pad + self.bezel), self.mask)
+        x, y, iw, ih = self.island
+        ImageDraw.Draw(img).rounded_rectangle((x, y, x + iw, y + ih), ih // 2, fill=(8, 8, 10, 255))
+        dy = int(math.sin(t * 2 * math.pi / 3.2) * 8)  # gentle float
+        if enters:
+            dy += int((1 - _ease_back(t / 0.7)) * self.ph * 0.6)
+        return img, (self.px - self.pad, self.py - self.pad + dy)
+
+    def close(self) -> None:
+        if self.reader is not None:
+            self.reader.close()
+
+
 class _ClipReader:
     """Decodes a footage file into frames of exactly w x h at FPS (cover-crop, looped if too short)."""
 
@@ -161,13 +264,20 @@ class VideoRenderer:
         brand = self._layer(w, Block(req.brand_name, 44, alpha=0.85), req.rtl, margin) if req.brand_name else None
 
         durs, narration, scene_words = self._timeline(req)
+        media = [(req.media[i] if i < len(req.media) else "") or "" for i in range(len(req.scenes))]
+        geo = _phone_layout(w, h, margin, req.rtl)
+        # per scene: (text centre x, text centre y, text width, text max height); scenes with app media leave room
+        boxes = [(geo["text"] if m else (w // 2, h // 2, w - 2 * margin, int(h * 0.6))) for m in media]
+        sizes_k = [max(0.62, min(1.0, b[2] / (w - 2 * margin))) for b in boxes]  # narrow text column -> smaller type
         layers = []
         for i, (text, dur) in enumerate(zip(req.scenes, durs)):
             is_cta = i == len(req.scenes) - 1 and text == req.cta and bool(req.cta)
-            block = (Block(text, 76, True, ink, line_height=1.25, pill=secondary, pad=(34, 80), align="center")
-                     if is_cta else Block(text, 112 if i == 0 else 84, True, white, line_height=1.3,
+            tw, th = boxes[i][2], boxes[i][3]
+            k = sizes_k[i]
+            block = (Block(text, int(76 * k), True, ink, line_height=1.25, pill=secondary, pad=(34, 80), align="center")
+                     if is_cta else Block(text, int((112 if i == 0 else 84) * k), True, white, line_height=1.3,
                                           align="center"))
-            layers.append((self._layer(w, block, req.rtl, margin, max_h=int(h * 0.6)), dur, is_cta))
+            layers.append((self._layer(tw + 2 * margin, block, req.rtl, margin, max_h=th), dur, is_cta))
 
         total = sum(d for _, d, _ in layers)
         # synced captions: per scene, word groups timed on the scene's own clock (None = static scene text)
@@ -176,7 +286,7 @@ class VideoRenderer:
         for i, (text, (_, dur, is_cta)) in enumerate(zip(req.scenes, layers)):
             g = None
             if scene_words[i] and req.captions and not is_cta:
-                g = self._word_groups(scene_words[i], w - 2 * margin, 112 if i == 0 else 84, req.rtl) or None
+                g = self._word_groups(scene_words[i], boxes[i][2], int((112 if i == 0 else 84) * sizes_k[i]), req.rtl) or None
             if g:
                 captions += [(at + a, at + min(b, dur), " ".join(x[2] for x in ws)) for a, b, ws in g]
             else:
@@ -214,9 +324,14 @@ class VideoRenderer:
             try:
                 start = 0.0
                 frame_no = 0
+                prev_last = None  # last frame of the previous scene, for the transition
+                glow2 = self._glow(int(w * 0.7), _mix(primary, white, 0.35))
                 for idx, (layer, dur, is_cta) in enumerate(layers):
                     path = self._footage(req, idx, w, h, dur)
                     reader = _ClipReader(path, w, h, dur) if path else None
+                    phone = _Phone(media[idx], geo, dur) if media[idx] else None
+                    enters = phone is not None and not (idx > 0 and media[idx - 1])  # slides in unless already shown
+                    cx, cy, tw, _ = boxes[idx]
                     cache: dict = {}
                     try:
                         for f in range(int(round(dur * FPS))):
@@ -231,17 +346,29 @@ class VideoRenderer:
                             lay, enter_t, quick = layer, t, False
                             if groups[idx]:
                                 lay, enter_t, quick = self._caption_at(groups[idx], t, cache, idx == 0, secondary,
-                                                                       w, margin, req.rtl)
+                                                                       tw + 2 * margin, margin, req.rtl, sizes_k[idx])
                             frame = self._frame(base, glow, brand, lay, t, dur, (start + t) / total, is_cta,
                                                 secondary, w, h, margin, last=idx == len(layers) - 1,
-                                                enter_t=enter_t, quick=quick)
+                                                enter_t=enter_t, quick=quick, center=(cx, cy),
+                                                glow2=glow2 if reader is None else None,
+                                                phone=phone.render(t, enters) if phone else None)
+                            if prev_last is not None and t < TRANSITION:  # zoom-through crossfade between scenes
+                                a = _ease_out(t / TRANSITION)
+                                zoom = 1 + 0.08 * a
+                                big = prev_last.resize((int(w * zoom), int(h * zoom)), Image.BILINEAR)
+                                ox, oy = (big.width - w) // 2, (big.height - h) // 2
+                                frame = Image.blend(big.crop((ox, oy, ox + w, oy + h)), frame, a)
                             proc.stdin.write(frame.tobytes())
+                            last_frame = frame
                             frame_no += 1
                             if on_progress and frame_no % FPS == 0:
                                 on_progress(frame_no / n_frames)
                     finally:
                         if reader is not None:
                             reader.close()
+                        if phone is not None:
+                            phone.close()
+                    prev_last = last_frame
                     start += dur
                 proc.stdin.close()
             except BrokenPipeError:
@@ -330,14 +457,14 @@ class VideoRenderer:
             out.append(cur)
         return [(g[0][0], out[i + 1][0][0] if i + 1 < len(out) else g[-1][1], g) for i, g in enumerate(out)]
 
-    def _caption_at(self, groups, t, cache, first, secondary, w, margin, rtl):
+    def _caption_at(self, groups, t, cache, first, secondary, w, margin, rtl, size_k=1.0):
         """(layer, seconds since this group appeared, quick) at scene time t; the spoken word is highlighted."""
         gi = max([i for i, (a, _, _) in enumerate(groups) if t >= a] or [0])
         a, _, ws = groups[gi]
         active = max([j for j, (s, _, _) in enumerate(ws) if t >= s] or [-1])
         if (gi, active) not in cache:
-            cache[(gi, active)] = self._caption_layer([x[2] for x in ws], active, 112 if first else 84, secondary,
-                                                      w, margin, rtl)
+            cache[(gi, active)] = self._caption_layer([x[2] for x in ws], active, int((112 if first else 84) * size_k),
+                                                      secondary, w, margin, rtl)
         return cache[(gi, active)], (t if gi == 0 else t - a), gi > 0
 
     @staticmethod
@@ -409,13 +536,20 @@ class VideoRenderer:
         return out
 
     def _frame(self, bg, glow, brand, layer, t, dur, progress, is_cta, secondary, w, h, margin, last,
-               enter_t=None, quick=False):
+               enter_t=None, quick=False, center=None, glow2=None, phone=None):
         frame = bg.copy().convert("RGBA")
-        # drifting light (continuous across scenes)
+        # drifting lights (continuous across scenes)
         gt = progress * 2 * math.pi
         gx = int(w * 0.5 + w * 0.35 * math.sin(gt) - glow.width / 2)
         gy = int(h * 0.45 + h * 0.25 * math.cos(gt * 0.7) - glow.height / 2)
         frame.paste(glow, (gx, gy), glow)  # paste (not alpha_composite) tolerates off-canvas positions
+        if glow2 is not None:
+            gx2 = int(w * 0.5 + w * 0.4 * math.cos(gt * 1.3 + 1.7) - glow2.width / 2)
+            gy2 = int(h * 0.55 + h * 0.3 * math.sin(gt * 0.9 + 0.6) - glow2.height / 2)
+            frame.paste(glow2, (gx2, gy2), glow2)
+        if phone is not None:
+            img, (px, py) = phone
+            frame.paste(img, (px, py), img)
         if brand is not None:
             frame.alpha_composite(brand, (w - margin - brand.width, margin) if brand.width < w else (0, margin))
         # scene text: slide up + fade in, fade out at the end (the last scene stays)
@@ -429,7 +563,8 @@ class VideoRenderer:
             s = 1 + 0.035 * math.sin(max(0.0, t - 0.55) * 2 * math.pi / 1.2)
             lay = layer.resize((max(1, int(layer.width * s)), max(1, int(layer.height * s))), Image.BILINEAR)
         lay = self._fade(lay, alpha)
-        x, y = (w - lay.width) // 2, (h - lay.height) // 2 + dy
+        cx, cy = center or (w // 2, h // 2)
+        x, y = cx - lay.width // 2, cy - lay.height // 2 + dy
         frame.paste(lay, (x, y), lay)
         # progress bar
         bar_y = h - margin // 2

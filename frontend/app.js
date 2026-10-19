@@ -221,12 +221,14 @@ function EditModal({ it, onClose, onSaved }) {
   const isVideo = it.media_type === "video";
   const lines = (k) => ((it.design || {})[k] || []).join("\n");
   const [f, setF] = useState({ headline: it.headline, caption: it.caption, cta: it.cta, planned_date: it.planned_date || "",
-    video_scenes: lines("video_scenes"), video_broll: lines("video_broll") });
+    video_scenes: lines("video_scenes"), video_broll: lines("video_broll"), video_media: [...((it.design || {}).video_media || [])] });
+  const [media] = useFetch("/media");
   const save = async (e) => {
     e.preventDefault();
     const split = (t) => t.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 6);
     const body = { ...f, planned_date: f.planned_date || null, video_scenes: split(f.video_scenes), video_broll: split(f.video_broll) };
-    if (!isVideo) { delete body.video_scenes; delete body.video_broll; }
+    body.video_media = body.video_scenes.map((_, i) => f.video_media[i] || "");
+    if (!isVideo) { delete body.video_scenes; delete body.video_broll; delete body.video_media; }
     await api(`/content-items/${it.id}`, { method: "PATCH", body });
     onSaved();
   };
@@ -237,6 +239,10 @@ function EditModal({ it, onClose, onSaved }) {
     <p><label>زر الدعوة</label><input maxlength="100" value=${f.cta} onInput=${(e) => setF({ ...f, cta: e.target.value })} /></p>
     <p><label>تاريخ النشر</label><input type="date" value=${f.planned_date} onInput=${(e) => setF({ ...f, planned_date: e.target.value })} /></p>
     ${isVideo && html`<p><label>مشاهد الفيديو (سطر لكل مشهد، حتى 6)</label><textarea rows="4" value=${f.video_scenes} onInput=${(e) => setF({ ...f, video_scenes: e.target.value })}></textarea></p>
+      ${media && media.length > 0 && html`<p><label>لقطة التطبيق لكل مشهد (تظهر داخل هاتف)</label>
+        ${f.video_scenes.split("\n").filter((x) => x.trim()).slice(0, 6).map((sc, i) => html`<div class="row" style="align-items:center;margin-bottom:6px">
+          <span class="muted" style="flex:1;min-width:120px">${i + 1}. ${sc.slice(0, 40)}</span>
+          <${MediaPicker} value=${f.video_media[i]} media=${media} onChange=${(v) => { const vm = [...f.video_media]; vm[i] = v; setF({ ...f, video_media: vm }); }} /></div>`)}</p>`}
       <p><label>لقطات الخلفية: كلمات بحث إنجليزية (سطر لكل مشهد، مثل: woman typing laptop office)</label><textarea rows="4" dir="ltr" value=${f.video_broll} onInput=${(e) => setF({ ...f, video_broll: e.target.value })}></textarea></p>`}
     <p class="muted">بعد التعديل أعد توليد التصميم ليظهر النص الجديد عليه.</p>
     <div class="actions"><button class="primary">حفظ</button><button type="button" onClick=${onClose}>إلغاء</button></div>
@@ -455,11 +461,67 @@ function BrandBrain({ pid }) {
       </form></div>`;
 }
 
+/* ---------- Media library: screenshots & screen recordings of your own app, shown inside a phone in videos ---------- */
+function MediaPicker({ value, onChange, media }) {
+  if (!media || !media.length) return null;
+  const cur = media.find((m) => m.id === value);
+  return html`<div class="field" style="flex:0 0 220px"><div class="row" style="gap:6px;align-items:center;flex-wrap:nowrap">
+    ${cur && html`<img src=${`${API}/media/${cur.id}/poster`} alt="" style="width:34px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--line)" />`}
+    <select value=${value || ""} onChange=${(e) => onChange(e.target.value)} title="لقطة من التطبيق تظهر داخل هاتف في هذا المشهد">
+      <option value="">📱 بدون لقطة تطبيق</option>
+      ${media.map((m) => html`<option value=${m.id}>${m.kind === "video" ? "🎬" : "🖼️"} ${(m.description || m.filename).slice(0, 40)}</option>`)}
+    </select></div></div>`;
+}
+
+function MediaLibraryPage() {
+  const [items, reload] = useFetch("/media");
+  const [desc, setDesc] = useState("");
+  const [busy, setBusy] = useState(false);
+  const upload = async (e) => {
+    e.preventDefault();
+    const files = [...e.target.files.files];
+    if (!files.length) return;
+    setBusy(true);
+    try {
+      for (const f of files) {
+        const fd = new FormData();
+        fd.append("file", f);
+        fd.append("description", desc);
+        const res = await fetch(`${API}/media`, { method: "POST", body: fd });
+        if (!res.ok) { let d = res.statusText; try { d = (await res.json()).detail; } catch {} toastSetter(`${f.name}: ${d}`); }
+      }
+      setDesc(""); e.target.reset(); reload();
+    } finally { setBusy(false); }
+  };
+  const save = async (m, description) => { if (description !== m.description) { await api(`/media/${m.id}`, { method: "PATCH", body: { description } }); reload(); } };
+  const del = async (m) => { if (confirm("حذف هذه اللقطة من المكتبة؟")) { await api(`/media/${m.id}`, { method: "DELETE" }); reload(); } };
+  return html`<h1>مكتبة الوسائط</h1>
+    <form class="card" onSubmit=${upload}>
+      <h2>أضف لقطات من تطبيقك</h2>
+      <p class="muted">ارفع صور شاشات (PNG/JPG) أو تسجيلات شاشة (MP4/MOV) من تطبيقك أو منتجك. تظهر داخل إطار هاتف متحرك في الفيديوهات،
+        ويختار Claude لكل مشهد اللقطة المناسبة حسب <strong>الوصف</strong>، فاكتب ما يظهر في الشاشة بوضوح.</p>
+      <div class="row">
+        <div class="field"><label>الملفات (يمكن اختيار أكثر من ملف)</label><input name="files" type="file" multiple accept="image/png,image/jpeg,image/webp,video/mp4,video/quicktime,video/webm" required /></div>
+        <div class="field"><label>الوصف (ما يظهر في الشاشة)</label><input value=${desc} maxlength="300" onInput=${(e) => setDesc(e.target.value)} placeholder="مثال: شاشة رفع الفيديو وتحويله إلى مستند Word" /></div>
+        <button class="primary" disabled=${busy}>${busy ? html`<${Busy} text="جارٍ الرفع..." />` : "رفع"}</button>
+      </div>
+    </form>
+    ${items === null ? html`<${Busy} text="تحميل..." />` : items.length === 0 ? html`<p class="muted">المكتبة فارغة.</p>` : html`
+      <div class="grid">${items.map((m) => html`<div class="card item" key=${m.id}>
+        ${m.kind === "video" ? html`<video controls preload="none" poster=${`${API}/media/${m.id}/poster`} src=${`${API}/media/${m.id}/file`}></video>`
+          : html`<img src=${`${API}/media/${m.id}/poster`} alt="" style="aspect-ratio:9/16;object-fit:cover" />`}
+        <p class="muted" style="max-height:none">${m.kind === "video" ? "🎬 تسجيل" : "🖼️ صورة"} · ${m.width}×${m.height}${m.duration_ms ? ` · ${(m.duration_ms / 1000).toFixed(0)} ث` : ""}</p>
+        <textarea rows="2" maxlength="300" placeholder="اكتب ما يظهر في الشاشة" value=${m.description} onBlur=${(e) => save(m, e.target.value)}></textarea>
+        <div class="actions"><button class="danger" onClick=${() => del(m)}>حذف</button></div>
+      </div>`)}</div>`}`;
+}
+
 /* ---------- Video studio: prompt -> script -> video -> export ---------- */
-const EMPTY_SCRIPT = { title: "", brand_name: "", scenes: [""], broll: [""], cta: "" };
+const EMPTY_SCRIPT = { title: "", brand_name: "", scenes: [""], broll: [""], media: [""], cta: "" };
 
 function Studio() {
   const [opt] = useFetch("/studio/options");
+  const [media] = useFetch("/media");
   const [videos, reload] = useFetch("/studio/videos");
   const [prompt, setPrompt] = useState("");
   const [aspect, setAspect] = useState("9:16");
@@ -481,9 +543,10 @@ function Studio() {
     setBusy("script");
     try { setScript(await api("/studio/script", { method: "POST", body: { prompt, aspect, length } })); } catch {} finally { setBusy(""); }
   };
-  const setScene = (i, k, v) => setScript((s) => { const n = { ...s, [k]: [...s[k]] }; n[k][i] = v; return n; });
-  const addScene = () => setScript((s) => ({ ...s, scenes: [...s.scenes, ""], broll: [...s.broll, ""] }));
-  const delScene = (i) => setScript((s) => ({ ...s, scenes: s.scenes.filter((_, j) => j !== i), broll: s.broll.filter((_, j) => j !== i) }));
+  const setScene = (i, k, v) => setScript((s) => { const n = { ...s, [k]: [...(s[k] || [])] }; n[k][i] = v; return n; });
+  const addScene = () => setScript((s) => ({ ...s, scenes: [...s.scenes, ""], broll: [...s.broll, ""], media: [...(s.media || []), ""] }));
+  const delScene = (i) => setScript((s) => ({ ...s, scenes: s.scenes.filter((_, j) => j !== i), broll: s.broll.filter((_, j) => j !== i),
+    media: (s.media || []).filter((_, j) => j !== i) }));
   const make = async () => {
     setBusy("video");
     try {
@@ -505,6 +568,7 @@ function Studio() {
         <button type="button" onClick=${() => setScript(script || EMPTY_SCRIPT)}>سأكتب المشاهد بنفسي</button>
       </div>
       ${!opt.ai_ready && html`<p class="muted">مفتاح Anthropic غير مضبوط، فاكتب المشاهد بنفسك.</p>`}
+      ${media && media.length === 0 && html`<p class="muted">💡 ارفع لقطات من تطبيقك في <a href="#/media">مكتبة الوسائط</a> ليعرضها الفيديو داخل هاتف متحرك.</p>`}
     </form>
 
     ${script && html`<div class="card">
@@ -517,6 +581,7 @@ function Studio() {
         <textarea class="scene" value=${sc} maxlength="200" onInput=${(e) => setScene(i, "scenes", e.target.value)} placeholder="نص المشهد (يُقال بالصوت ويظهر على الشاشة)"></textarea>
         <div class="row">
           <div class="field"><input dir="ltr" value=${script.broll[i] || ""} onInput=${(e) => setScene(i, "broll", e.target.value)} placeholder="stock footage search (English)" title="كلمات البحث عن لقطة الخلفية" /></div>
+          <${MediaPicker} value=${(script.media || [])[i]} onChange=${(v) => setScene(i, "media", v)} media=${media} />
           ${script.scenes.length > 1 && html`<button type="button" class="danger" onClick=${() => delScene(i)}>حذف</button>`}
         </div></li>`)}</ol>
       ${script.scenes.length < 12 && html`<button type="button" onClick=${addScene}>+ مشهد</button>`}
@@ -586,8 +651,9 @@ function App() {
   let view;
   if (parts[0] === "p" && parts[1]) view = parts[2] === "c" && parts[3] ? html`<${CampaignPage} pid=${parts[1]} cid=${parts[3]} />` : html`<${Project} id=${parts[1]} tab=${parts[2]} key=${parts[1]} />`;
   else if (parts[0] === "studio") view = html`<${Studio} />`;
+  else if (parts[0] === "media") view = html`<${MediaLibraryPage} />`;
   else view = html`<${Projects} />`;
-  return html`<header><a href="#/">Marketing OS</a><a href="#/studio">استوديو الفيديو</a><span class="sp"></span><a href="/docs" class="muted" style="font-weight:400">API</a></header>
+  return html`<header><a href="#/">Marketing OS</a><a href="#/studio">استوديو الفيديو</a><a href="#/media">مكتبة الوسائط</a><span class="sp"></span><a href="/docs" class="muted" style="font-weight:400">API</a></header>
     <main>${view}</main>${toast && html`<div class=${"toast" + (toast.ok ? " ok" : "")} onClick=${() => setToast(null)}>${toast.m}</div>`}`;
 }
 

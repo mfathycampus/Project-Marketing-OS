@@ -21,12 +21,13 @@ from pydantic import BaseModel, Field
 
 from app.ai.provider import LLMProvider, LLMRequest
 from app.config import settings
+from app.media.library import describe_for_ai, get_library
 from app.storage.local import LocalStorage
 from app.video import broll, voice
 from app.video.renderer import SIZES, VideoRenderer, VideoRequest, ffmpeg_exe
 
 log = logging.getLogger("studio")
-PROMPT = Path(__file__).resolve().parents[1] / "ai" / "prompts" / "studio.v1.md"
+PROMPT = Path(__file__).resolve().parents[1] / "ai" / "prompts" / "studio.v2.md"
 LENGTHS = {"short": 4, "medium": 6, "long": 10}  # scene counts for ~15 / ~30 / ~60 seconds
 MAX_SCENES = 12
 
@@ -58,13 +59,18 @@ class StudioScript(BaseModel):
     scenes: list[str] = Field(description="Narration lines, one per scene, max 90 characters each")
     broll: list[str] = Field(description="English stock-footage search term per scene, same order and count")
     cta: str = Field(description="Short call to action, max 30 characters")
+    media: list[str] = Field(default_factory=list, description=(
+        "Per scene, same order and count as scenes: the id of an item from <media_library> that shows what the "
+        "scene talks about (it appears inside a phone mockup), or an empty string"))
 
 
 def write_script(llm: LLMProvider, prompt: str, aspect: str, length: str) -> dict:
     count = LENGTHS.get(length, LENGTHS["medium"])
     fmt = {"9:16": "vertical (Reels / TikTok / Shorts)", "16:9": "landscape (YouTube)"}.get(aspect, "square feed")
+    library = get_library().list()
+    lib_txt = f"\n<media_library>\n{describe_for_ai(library)}\n</media_library>" if library else ""
     req = LLMRequest(instructions=PROMPT.read_text(encoding="utf-8"), stable_context="",
-                     user_message=f"<request>\nscene_count: {count}\nformat: {fmt}\ndescription: {prompt}\n</request>",
+                     user_message=f"<request>\nscene_count: {count}\nformat: {fmt}\ndescription: {prompt}\n</request>{lib_txt}",
                      output_model=StudioScript)
     try:
         data = StudioScript.model_validate(llm.generate_structured(req).data)
@@ -72,14 +78,18 @@ def write_script(llm: LLMProvider, prompt: str, aspect: str, length: str) -> dic
         raise StudioError(f"تعذّر كتابة السيناريو بالذكاء الاصطناعي ({exc}). اكتب المشاهد بنفسك أو تحقق من مفتاح Anthropic") from exc
     scenes = [s.strip() for s in data.scenes if s.strip()][:MAX_SCENES]
     terms = [b.strip() for b in data.broll][: len(scenes)]
+    known = {m["id"] for m in library}
+    media = [(m.strip() if m.strip() in known else "") for m in data.media][: len(scenes)]
     return {"title": data.title.strip()[:80], "brand_name": data.brand_name.strip(), "scenes": scenes,
-            "broll": terms + [""] * (len(scenes) - len(terms)), "cta": data.cta.strip()}
+            "broll": terms + [""] * (len(scenes) - len(terms)), "cta": data.cta.strip(),
+            "media": media + [""] * (len(scenes) - len(media))}
 
 
 class VideoSpec(BaseModel):
     title: str = Field(default="فيديو", max_length=120)
     scenes: list[str] = Field(min_length=1, max_length=MAX_SCENES)
     broll: list[str] = Field(default_factory=list, max_length=MAX_SCENES)
+    media: list[str] = Field(default_factory=list, max_length=MAX_SCENES)  # media-library id per scene ('' = none)
     cta: str = Field(default="", max_length=80)
     brand_name: str = Field(default="", max_length=80)
     aspect: str = "9:16"
@@ -193,7 +203,8 @@ class Studio:
             res = VideoRenderer().render(VideoRequest(
                 scenes=scenes, cta=cta, brand_name=spec.brand_name, primary_color=spec.primary_color,
                 secondary_color=spec.secondary_color, aspect=spec.aspect, music_seed=vid, voice=spec.voice,
-                broll=terms, captions=spec.captions), on_progress=progress)
+                broll=terms, captions=spec.captions,
+                media=[get_library().resolve(m) or "" for m in spec.media]), on_progress=progress)
             self.storage.put(f"studio/{vid}/master.mp4", res.mp4)
             self.storage.put(f"studio/{vid}/captions.srt", res.srt().encode("utf-8"))
             meta.update(status="ready", progress=1.0, width=res.width, height=res.height, duration_ms=res.duration_ms)

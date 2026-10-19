@@ -101,7 +101,8 @@ def test_write_script_uses_claude_output(fake_llm):
     fake_llm.responses.append({"title": "قهوة", "brand_name": "المذاق", "scenes": ["أ", " ", "ب"],
                                "broll": ["coffee"], "cta": "اطلب"})
     out = st.write_script(fake_llm, "فيديو لمحل قهوة", "9:16", "short")
-    assert out == {"title": "قهوة", "brand_name": "المذاق", "scenes": ["أ", "ب"], "broll": ["coffee", ""], "cta": "اطلب"}
+    assert out == {"title": "قهوة", "brand_name": "المذاق", "scenes": ["أ", "ب"], "broll": ["coffee", ""], "cta": "اطلب",
+                   "media": ["", ""]}
     assert "scene_count: 4" in fake_llm.calls[0].user_message
     with pytest.raises(st.StudioError, match="بنفسك"):
         st.write_script(fake_llm, "x", "9:16", "short")  # empty response fails validation
