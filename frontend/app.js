@@ -83,13 +83,14 @@ function Project({ id, tab: rawTab }) {
   const [tab, qs] = (rawTab || "").split("?");
   const query = Object.fromEntries(new URLSearchParams(qs || ""));
   const [project] = useFetch(`/projects/${id}`);
-  const tabs = [["campaigns", "الحملات"], ["calendar", "التقويم"], ["publish", "النشر"], ["brand", "هوية العلامة"]];
+  const tabs = [["campaigns", "الحملات"], ["calendar", "التقويم"], ["publish", "النشر"], ["results", "النتائج"], ["brand", "هوية العلامة"]];
   const cur = tab || "campaigns";
   return html`<h1>${project ? project.name : "..."}</h1>
     <div class="tabs">${tabs.map(([k, l]) => html`<button class=${cur === k ? "on" : ""} onClick=${() => (location.hash = `#/p/${id}/${k}`)}>${l}</button>`)}</div>
     ${cur === "campaigns" && html`<${Campaigns} pid=${id} />`}
     ${cur === "calendar" && html`<${Calendar} pid=${id} />`}
     ${cur === "publish" && html`<${Publishing} pid=${id} query=${query} />`}
+    ${cur === "results" && html`<${Results} pid=${id} />`}
     ${cur === "brand" && html`<${BrandBrain} pid=${id} />`}`;
 }
 
@@ -668,6 +669,9 @@ function Studio() {
       <div class="actions" style="margin-top:12px"><button class="primary" disabled=${busy || !script.scenes.some((s) => s.trim())} onClick=${make}>${busy === "video" ? html`<${Busy} text="جارٍ البدء..." />` : "٣. أنشئ الفيديو"}</button></div>
     </div>`}
 
+    <${UgcBox} opt=${opt} media=${media} reload=${reload} />
+    <${StudioLessons} />
+
     <h2>فيديوهاتي</h2>
     ${videos === null ? html`<${Busy} text="تحميل..." />` : videos.length === 0 ? html`<p class="muted">لا توجد فيديوهات بعد.</p>` : html`
       <div class="grid">${videos.map((v) => html`<${StudioCard} key=${v.id} v=${v} opt=${opt} reload=${reload} />`)}</div>`}`;
@@ -694,12 +698,14 @@ function StudioCard({ v, opt, reload }) {
   return html`<div class="card item">
     ${v.status === "ready" ? html`<video controls preload="metadata" style=${{ aspectRatio: ratio }} src=${`${API}/studio/videos/${v.id}/preview`}></video>`
       : v.status === "failed" ? html`<div class="ph error">${v.error || "فشل الإنشاء"}</div>`
-      : html`<div class="ph"><div style="width:100%"><${Busy} text=${v.status === "queued" ? "في الانتظار..." : `جارٍ الإنشاء ${Math.round((v.progress || 0) * 100)}%`} />
+      : html`<div class="ph"><div style="width:100%"><${Busy} text=${v.status === "queued" ? "في الانتظار..." : `${v.stage || "جارٍ الإنشاء"} ${Math.round((v.progress || 0) * 100)}%`} />
           <div class="bar"><span style=${{ width: `${Math.round((v.progress || 0) * 100)}%` }}></span></div></div></div>`}
     <h3>${v.title}</h3>
     ${v.variant && html`<p class="muted" style="max-height:none;font-size:13px">🧪 نسخة ${v.variant} من اختبار A/B: انشر النسخ في أيام متقاربة وقارن المشاهدات ونسبة الإكمال.</p>`}
     ${v.duration_ms > 35000 && html`<p class="error" style="max-height:none;font-size:13px">⏱️ ${(v.duration_ms / 1000).toFixed(0)} ثانية: أطول من المناسب للريلز (15–30 ث). قلّل المشاهد أو اختصر الجمل.</p>`}
-    <p>${v.spec.aspect}${v.duration_ms ? ` · ${(v.duration_ms / 1000).toFixed(1)} ث` : ""}${v.spec.voice ? ` · ${opt.voices[v.spec.voice] || v.spec.voice}` : " · بدون صوت"}</p>
+    ${v.warning && html`<p class="muted" style="max-height:none;font-size:13px">⚠️ ${v.warning}</p>`}
+    <p>${v.kind === "ugc" ? "🎥 بوجهك · " : ""}${v.spec.aspect}${v.duration_ms ? ` · ${(v.duration_ms / 1000).toFixed(1)} ث` : ""}${v.kind === "ugc" ? (v.source_seconds ? ` (من ${v.source_seconds} ث)` : "") : v.spec.voice ? ` · ${opt.voices[v.spec.voice] || v.spec.voice}` : " · بدون صوت"}</p>
+    ${v.status === "ready" && html`<${VideoResults} v=${v} reload=${reload} />`}
     ${v.status === "ready" && html`<div class="row" style="margin-bottom:10px">
       <div class="field"><label>الصيغة</label><select value=${fmt} onChange=${(e) => setFmt(e.target.value)}>${Object.entries(opt.formats).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>
       ${fmt !== "srt" && html`<div class="field"><label>الجودة</label><select value=${quality} onChange=${(e) => setQuality(e.target.value)}>${Object.entries(opt.qualities).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>`}
@@ -709,6 +715,166 @@ function StudioCard({ v, opt, reload }) {
       ${v.status !== "queued" && v.status !== "rendering" && html`<button class="danger" onClick=${del}>حذف</button>`}
     </div>
   </div>`;
+}
+
+/* ---------- "Your face" videos ---------- */
+function UgcBox({ opt, media, reload }) {
+  const [open, setOpen] = useState(false);
+  const [topic, setTopic] = useState("");
+  const [seconds, setSeconds] = useState(30);
+  const [talk, setTalk] = useState(null);
+  const [file, setFile] = useState(null);
+  const remembered = (() => { try { return JSON.parse(localStorage.getItem("studio-end") || "{}"); } catch { return {}; } })();
+  const [o, setO] = useState({ notes: "", cta: "", brand_name: "", style: "modern", music: "auto", logo: "", end_url: remembered.url || "",
+    end_offer: remembered.offer || "", captions: true, jump_cuts: true, punch_zoom: true, smart_edit: true, aspect: "9:16", language: "ar",
+    primary_color: "#0F766E", secondary_color: "#F59E0B" });
+  const [busy, setBusy] = useState("");
+  const set = (k) => (e) => setO({ ...o, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+  const writeTalk = async () => {
+    setBusy("talk");
+    try { setTalk(await api("/studio/ugc/script", { method: "POST", body: { prompt: topic, seconds: Number(seconds) } })); } catch {} finally { setBusy(""); }
+  };
+  const upload = async (e) => {
+    e.preventDefault();
+    if (!file) return;
+    setBusy("upload");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("options", JSON.stringify({ ...o, notes: o.notes || topic }));
+      const res = await fetch(`${API}/studio/ugc`, { method: "POST", body: fd });
+      if (!res.ok) { let d = res.statusText; try { d = (await res.json()).detail; } catch {} toastSetter(typeof d === "string" ? d : JSON.stringify(d)); return; }
+      toastSetter("تم الرفع — يجري تفريغ الكلام والمونتاج، يظهر التقدم بالأسفل", true);
+      setFile(null);
+      reload();
+    } finally { setBusy(""); }
+  };
+  if (!open) return html`<div class="card"><h2>🎥 فيديو بوجهك</h2>
+    <p class="muted">صوّر نفسك تتكلم بالجوال، وارفع الفيديو: يقصّ السكتات، ويضيف ترجمة متزامنة وعنوانًا افتتاحيًا، ويعرض لقطات تطبيقك وأرقامك أثناء كلامك، ثم بطاقة الختام. الوجه الحقيقي يبني ثقة أكثر من أي قالب.</p>
+    <button class="primary" onClick=${() => setOpen(true)}>ابدأ فيديو بوجهك</button></div>`;
+  return html`<div class="card"><h2>🎥 فيديو بوجهك</h2>
+    <h3 style="margin:0 0 6px">أ. (اختياري) نص تقرأه أمام الكاميرا</h3>
+    <div class="row">
+      <div class="field"><input value=${topic} onInput=${(e) => setTopic(e.target.value)} placeholder="عن ماذا ستتكلم؟ مثال: معين يفرّغ اجتماعاتك ويطلع لك ملخص ومهام" /></div>
+      <div class="field" style="flex:0 0 140px"><select value=${seconds} onChange=${(e) => setSeconds(e.target.value)}>
+        <option value="20">~20 ثانية</option><option value="30">~30 ثانية</option><option value="45">~45 ثانية</option><option value="60">~60 ثانية</option></select></div>
+      <button type="button" disabled=${busy || topic.trim().length < 3 || !opt.ai_ready} onClick=${writeTalk}>${busy === "talk" ? html`<${Busy} text="Claude يكتب..." />` : "اكتب لي النص"}</button>
+    </div>
+    ${talk && html`<div class="card" style="background:var(--bg);margin-top:8px">
+      <ol style="font-size:20px;line-height:1.8;margin:0;padding-inline-start:24px">${talk.lines.map((l) => html`<li>${l}</li>`)}</ol>
+      ${talk.tips.length > 0 && html`<p class="muted" style="max-height:none">💡 ${talk.tips.join(" · ")}</p>`}
+      <button type="button" onClick=${() => navigator.clipboard?.writeText(talk.lines.join("\n"))}>نسخ النص</button></div>`}
+    <p class="muted" style="max-height:none">نصائح التصوير: الجوال رأسيًا في مستوى العين، وجهك للضوء (نافذة أمامك)، مكان هادئ، وابدأ مباشرة بالجملة الأولى. السكتات والأخطاء تُقصّ تلقائيًا، فأعد الجملة إن تلعثمت.</p>
+
+    <form onSubmit=${upload}>
+      <h3 style="margin:12px 0 6px">ب. ارفع الفيديو</h3>
+      <div class="field"><input type="file" accept="video/*" required onChange=${(e) => setFile(e.target.files[0] || null)} /></div>
+      ${!opt.transcribe && html`<p class="error">أداة تفريغ الكلام (faster-whisper) غير مثبتة: شغّل start.bat مرة واحدة. أول فيديو يحمّل نموذج Whisper (~460 ميجابايت) مرة واحدة.</p>`}
+      <div class="row" style="margin-top:8px">
+        <div class="field"><label>عن ماذا الفيديو؟ (يساعد Claude في اختيار اللقطات)</label><input value=${o.notes} onInput=${set("notes")} placeholder=${topic || "مثال: ميزة الملخص التلقائي في معين"} /></div>
+        <div class="field" style="flex:0 0 200px"><label>الدعوة لإجراء</label><input value=${o.cta} onInput=${set("cta")} placeholder="جرّب مجانًا" /></div>
+        <div class="field" style="flex:0 0 180px"><label>اسم العلامة</label><input value=${o.brand_name} onInput=${set("brand_name")} /></div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <${LogoPicker} value=${o.logo} media=${media} onChange=${(v) => setO({ ...o, logo: v || "" })} />
+        <div class="field" style="flex:0 0 180px"><label>الرابط في الختام</label><input dir="ltr" value=${o.end_url} onInput=${set("end_url")} placeholder="maeen.app" /></div>
+        <div class="field" style="flex:0 0 200px"><label>العرض (اختياري)</label><input value=${o.end_offer} onInput=${set("end_offer")} /></div>
+        ${opt.styles && html`<div class="field" style="flex:0 0 160px"><label>القالب</label><select value=${o.style} onChange=${set("style")}>${Object.entries(opt.styles).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>`}
+        ${opt.music && html`<div class="field" style="flex:0 0 220px"><label>الموسيقى</label><select value=${o.music} onChange=${set("music")}>${Object.entries(opt.music).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>`}
+        <div class="field" style="flex:0 0 150px"><label>المقاس</label><select value=${o.aspect} onChange=${set("aspect")}>${Object.entries(opt.aspects).map(([k, l]) => html`<option value=${k}>${l.split(" — ")[0]}</option>`)}</select></div>
+        <div class="field" style="flex:0 0 130px"><label>لغة الكلام</label><select value=${o.language} onChange=${set("language")}><option value="ar">العربية</option><option value="en">English</option><option value="">تلقائي</option></select></div>
+        <div class="field" style="flex:0 0 auto"><label>لون أساسي</label><input type="color" value=${o.primary_color} onInput=${set("primary_color")} /></div>
+        <div class="field" style="flex:0 0 auto"><label>لون التمييز</label><input type="color" value=${o.secondary_color} onInput=${set("secondary_color")} /></div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="check"><input type="checkbox" checked=${o.jump_cuts} onChange=${set("jump_cuts")} /> قص السكتات</label>
+        <label class="check"><input type="checkbox" checked=${o.punch_zoom} onChange=${set("punch_zoom")} /> تقريب خفيف مع كل قطع</label>
+        <label class="check"><input type="checkbox" checked=${o.captions} onChange=${set("captions")} /> ترجمة متزامنة</label>
+        <label class="check"><input type="checkbox" checked=${o.smart_edit} disabled=${!opt.ai_ready} onChange=${set("smart_edit")} /> مونتاج ذكي بـClaude (عنوان افتتاحي + لقطات التطبيق + أرقام)</label>
+      </div>
+      <div class="actions" style="margin-top:12px"><button class="primary" disabled=${busy || !file}>${busy === "upload" ? html`<${Busy} text="جارٍ الرفع..." />` : "ارفع وأنشئ الفيديو"}</button>
+        <button type="button" onClick=${() => setOpen(false)}>إغلاق</button></div>
+    </form></div>`;
+}
+
+/* ---------- Results + lessons (the learning loop) ---------- */
+const METRIC_FIELDS = [["views", "المشاهدات"], ["reach", "الوصول"], ["likes", "الإعجابات"], ["comments", "التعليقات"], ["shares", "المشاركات"], ["saves", "الحفظ"]];
+
+function MetricsForm({ initial, video, onSave, onCancel }) {
+  const [m, setM] = useState(() => ({ ...(initial || {}), completion: initial?.completion != null ? Math.round(initial.completion * 100) : "" }));
+  const fields = [...METRIC_FIELDS, ...(video ? [["avg_watch_s", "متوسط المشاهدة (ث)"], ["completion", "أكملوه %"]] : [["clicks", "النقرات"]])];
+  const save = (e) => {
+    e.preventDefault();
+    const body = {};
+    for (const [k] of fields) if (m[k] !== "" && m[k] != null) body[k] = k === "completion" ? Number(m[k]) / 100 : Number(m[k]);
+    onSave(body);
+  };
+  return html`<form onSubmit=${save} style="margin-top:8px"><div class="row" style="gap:6px">
+    ${fields.map(([k, l]) => html`<div class="field" style="flex:0 0 105px"><label style="font-size:12px">${l}</label>
+      <input type="number" min="0" step=${k === "avg_watch_s" ? "0.1" : "1"} max=${k === "completion" ? 100 : undefined} value=${m[k] ?? ""} onInput=${(e) => setM({ ...m, [k]: e.target.value })} /></div>`)}
+    </div><div class="actions" style="margin-top:6px"><button class="primary">حفظ</button>${onCancel && html`<button type="button" onClick=${onCancel}>إلغاء</button>`}</div></form>`;
+}
+
+function MetricsLine({ m }) {
+  if (!m) return null;
+  const parts = METRIC_FIELDS.filter(([k]) => m[k] != null).map(([k, l]) => `${l} ${Number(m[k]).toLocaleString("en")}`);
+  if (m.avg_watch_s != null) parts.push(`متوسط ${m.avg_watch_s} ث`);
+  if (m.completion != null) parts.push(`أكملوه ${Math.round(m.completion * 100)}%`);
+  return html`<p style="max-height:none;font-size:13px">${m.score != null ? html`<strong>التفاعل ${m.score}%</strong> · ` : ""}${parts.join(" · ")}</p>`;
+}
+
+function LessonsBox({ lessons, onMake, busy, hint }) {
+  return html`<div class="card" style="background:var(--bg)">
+    <h3 style="margin-top:0">🧠 ما تعلّمناه من النتائج</h3>
+    ${lessons ? html`<p style="max-height:none">${lessons.summary}</p>
+      ${lessons.do.length > 0 && html`<p style="max-height:none"><strong>افعل:</strong></p><ul>${lessons.do.map((x) => html`<li>${x}</li>`)}</ul>`}
+      ${lessons.avoid.length > 0 && html`<p style="max-height:none"><strong>تجنّب:</strong></p><ul>${lessons.avoid.map((x) => html`<li>${x}</li>`)}</ul>`}
+      ${lessons.winning_hooks.length > 0 && html`<p style="max-height:none"><strong>افتتاحيات ناجحة:</strong> ${lessons.winning_hooks.map((x) => `«${x}»`).join(" · ")}</p>`}
+      <p class="muted" style="max-height:none;font-size:13px">من ${lessons.based_on} نتيجة · ${fmtTime(lessons.created_at)} · تُرسل تلقائيًا لـClaude مع ${hint}</p>`
+      : html`<p class="muted" style="max-height:none">سجّل نتائج منشورين أو أكثر، ثم اطلب من Claude استخلاص الدروس: ستُستخدم تلقائيًا في ${hint}.</p>`}
+    <button disabled=${busy} onClick=${onMake}>${busy ? html`<${Busy} text="Claude يحلل..." />` : lessons ? "حدّث الدروس" : "استخلص الدروس"}</button></div>`;
+}
+
+function VideoResults({ v, reload }) {
+  const [edit, setEdit] = useState(false);
+  const save = async (body) => { await api(`/studio/videos/${v.id}/metrics`, { method: "PUT", body }); setEdit(false); reload(); };
+  return html`<div>
+    <${MetricsLine} m=${v.metrics} />
+    ${edit ? html`<${MetricsForm} initial=${v.metrics} video=${true} onSave=${save} onCancel=${() => setEdit(false)} />`
+      : html`<button style="margin-bottom:8px" onClick=${() => setEdit(true)}>📈 ${v.metrics ? "عدّل النتائج" : "سجّل النتائج بعد النشر"}</button>`}</div>`;
+}
+
+function StudioLessons() {
+  const [data, reload] = useFetch("/studio/lessons");
+  const [busy, setBusy] = useState(false);
+  const make = async () => { setBusy(true); try { await api("/studio/lessons", { method: "POST" }); reload(); } catch {} finally { setBusy(false); } };
+  return html`<${LessonsBox} lessons=${data?.lessons} onMake=${make} busy=${busy} hint="كل سيناريو وفيديو جديد في الاستوديو" />`;
+}
+
+function Results({ pid }) {
+  const [data, reload] = useFetch(`/projects/${pid}/results`);
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState("");
+  if (!data) return html`<${Busy} text="تحميل..." />`;
+  const refresh = async () => {
+    setBusy("refresh");
+    try { const r = await api(`/projects/${pid}/results/refresh`, { method: "POST" }); toastSetter(`حُدّثت نتائج ${r.updated} منشور${r.failed ? ` (تعذّر ${r.failed})` : ""}`, !r.failed); reload(); } catch {} finally { setBusy(""); }
+  };
+  const lessons = async () => { setBusy("lessons"); try { await api(`/projects/${pid}/lessons`, { method: "POST" }); reload(); } catch {} finally { setBusy(""); } };
+  const save = async (id, body) => { await api(`/publications/${id}/metrics`, { method: "PUT", body }); setEditing(null); reload(); };
+  return html`<div class="card"><h2>نتائج المنشورات</h2>
+      <p class="muted" style="max-height:none">نتائج فيسبوك وإنستغرام تُجلب تلقائيًا كل بضع ساعات. للمنصات الأخرى (أو إن لم تظهر الأرقام) سجّلها من إحصاءات المنصة.</p>
+      <button disabled=${busy} onClick=${refresh}>${busy === "refresh" ? html`<${Busy} text="جارٍ الجلب..." />` : "↻ اجلب النتائج الآن"}</button></div>
+    <${LessonsBox} lessons=${data.lessons} onMake=${lessons} busy=${busy === "lessons"} hint="كل حملة جديدة لهذا المشروع" />
+    ${data.results.length === 0 ? html`<p class="muted">لا توجد منشورات منشورة بعد.</p>` : html`<div class="grid" style="margin-top:16px">
+      ${data.results.map((r) => html`<div class="card item" key=${r.publication_id}>
+        <h3>${r.headline || "منشور"}</h3>
+        <p>${PLATFORMS[r.platform] || r.platform} · ${r.media_type === "video" ? "🎬 فيديو" : "🖼️ صورة"}${r.published_at ? ` · ${fmtTime(r.published_at)}` : ""}${r.url ? html` · <a href=${r.url} target="_blank" rel="noopener">فتح</a>` : ""}</p>
+        <${MetricsLine} m=${r.metrics} />
+        ${r.metrics?.note && html`<p class="muted" style="max-height:none;font-size:13px">⚠️ ${r.metrics.note}</p>`}
+        ${editing === r.publication_id ? html`<${MetricsForm} initial=${r.metrics} video=${r.media_type === "video"} onSave=${(b) => save(r.publication_id, b)} onCancel=${() => setEditing(null)} />`
+          : html`<button onClick=${() => setEditing(r.publication_id)}>📈 ${r.metrics ? "عدّل" : "سجّل النتائج"}</button>`}
+      </div>`)}</div>`}`;
 }
 
 /* ---------- App ---------- */

@@ -34,6 +34,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo     Optional: speech-to-text for "your face" videos (faster-whisper)...
+"%PY%" -m pip install --disable-pip-version-check -q -e ".[dev,ugc]" || echo     (skipped - "your face" videos need it; everything else works)
+
 echo [4/5] Chromium for high-fidelity designs (optional; built-in renderer is used if this fails)...
 "%PY%" -m playwright install chromium || echo     (Chromium not installed - designs will use the built-in renderer)
 

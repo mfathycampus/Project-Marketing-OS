@@ -48,6 +48,12 @@ def build_campaign_context(session: Session, project: Project, brief: str) -> Co
             + "\n</brand_rules>"
         )
 
+    from app.insights.lessons import lessons_text
+
+    learned = lessons_text(project.id, session)
+    if learned:
+        stable_parts.append(learned)
+
     products = _rank_products(project, brief)[:MAX_PRODUCTS]
     volatile = ""
     if products:

@@ -201,6 +201,70 @@ class MetaClient:
             return None
 
 
+    # ---------- results (the learning loop) ----------
+    def _insights(self, path: str, token: str, mapping: dict[str, str], extra: dict | None = None) -> dict:
+        """{our_name: value} for the metrics Meta returns. Metric names change between API versions and media
+        types, and one unknown name fails the whole request: then each metric is asked for alone."""
+        def parse(data: dict) -> dict:
+            out = {}
+            for row in data.get("data", []):
+                name = row.get("name")
+                val = (row.get("values") or [{}])[0].get("value") if row.get("values") else (row.get("total_value") or {}).get("value")
+                if name in mapping and isinstance(val, (int, float)):
+                    out[mapping[name]] = val
+            return out
+
+        params = {"access_token": token, **(extra or {})}
+        try:
+            return parse(self._call("GET", _graph(path), params={**params, "metric": ",".join(mapping)}))
+        except MetaError as exc:
+            if exc.code in AUTH_CODES or len(mapping) == 1:
+                raise
+        out = {}
+        for name in mapping:
+            try:
+                out |= parse(self._call("GET", _graph(path), params={**params, "metric": name}))
+            except MetaError as exc:
+                if exc.code in AUTH_CODES:
+                    raise
+        return out
+
+    def ig_media_stats(self, media_id: str, token: str) -> dict:
+        d = self._call("GET", _graph(f"/{media_id}"), params={"fields": "like_count,comments_count,media_product_type",
+                                                              "access_token": token})
+        out = {"likes": d.get("like_count"), "comments": d.get("comments_count")}
+        mapping = {"reach": "reach", "saved": "saves", "shares": "shares", "views": "views"}
+        if d.get("media_product_type") == "REELS":
+            mapping["ig_reels_avg_watch_time"] = "avg_watch_ms"
+        return out | self._insights(f"/{media_id}/insights", token, mapping)
+
+    def fb_post_stats(self, post_id: str, token: str) -> dict:
+        d = self._call("GET", _graph(f"/{post_id}"), params={
+            "fields": "shares,comments.summary(true).limit(0),reactions.summary(true).limit(0)", "access_token": token})
+        out = {"likes": ((d.get("reactions") or {}).get("summary") or {}).get("total_count"),
+               "comments": ((d.get("comments") or {}).get("summary") or {}).get("total_count"),
+               "shares": (d.get("shares") or {}).get("count", 0)}
+        try:
+            out |= self._insights(f"/{post_id}/insights", token,
+                                  {"post_impressions_unique": "reach", "post_clicks": "clicks"})
+        except MetaError:
+            pass  # needs read_insights; likes/comments/shares are still worth keeping
+        return out
+
+    def fb_video_stats(self, video_id: str, token: str) -> dict:
+        d = self._call("GET", _graph(f"/{video_id}"), params={
+            "fields": "likes.summary(true).limit(0),comments.summary(true).limit(0)", "access_token": token})
+        out = {"likes": ((d.get("likes") or {}).get("summary") or {}).get("total_count"),
+               "comments": ((d.get("comments") or {}).get("summary") or {}).get("total_count")}
+        try:
+            out |= self._insights(f"/{video_id}/video_insights", token, {
+                "total_video_views": "views", "total_video_impressions_unique": "reach",
+                "total_video_avg_time_watched": "avg_watch_ms", "total_video_complete_views": "complete_views"})
+        except MetaError:
+            pass
+        return out
+
+
 # ---------- provider ----------
 AUTH_CODES = {190, 102, 10, 200}  # expired/invalid token or missing permission
 

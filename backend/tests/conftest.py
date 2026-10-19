@@ -16,10 +16,14 @@ from app.db import Base, get_session
 from app.main import app
 
 
-@pytest.fixture
-def engine():
+@pytest.fixture(autouse=True)
+def engine(monkeypatch):
+    """In-memory database; code that opens its own session (background jobs, lessons) uses it too."""
+    from app import db
+
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(eng)
+    monkeypatch.setattr(db, "SessionLocal", sessionmaker(eng, expire_on_commit=False))
     return eng
 
 

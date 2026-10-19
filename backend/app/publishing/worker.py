@@ -1,6 +1,7 @@
 """Scheduler: publishes due items. PostgreSQL/SQLite `publications` is the source of truth."""
 import logging
 import threading
+import time
 
 from app.config import settings
 from app.db import SessionLocal
@@ -17,6 +18,13 @@ def process_due() -> int:
             service.run_publication(s, pid)
             n += 1
     return n
+
+
+def refresh_metrics() -> dict:
+    from app.insights.metrics import refresh
+
+    with SessionLocal() as s:
+        return refresh(s)
 
 
 class PublishingWorker:
@@ -36,9 +44,16 @@ class PublishingWorker:
             self._thread.join(timeout=5)
 
     def _loop(self) -> None:
+        next_metrics = time.monotonic() + 120  # first results fetch shortly after start-up
         while not self._stop.is_set():
             try:
                 process_due()
             except Exception:  # noqa: BLE001
                 log.exception("publisher loop error")
+            if settings.metrics_refresh_hours > 0 and time.monotonic() >= next_metrics:
+                next_metrics = time.monotonic() + settings.metrics_refresh_hours * 3600
+                try:
+                    log.info("metrics refreshed: %s", refresh_metrics())
+                except Exception:  # noqa: BLE001
+                    log.exception("metrics refresh error")
             self._stop.wait(settings.publish_poll_interval_s)

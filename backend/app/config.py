@@ -50,11 +50,13 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = ""  # from your ElevenLabs "My Voices" (python -m app.video.voice lists them)
     elevenlabs_model: str = "eleven_multilingual_v2"  # supports Arabic
+    whisper_model: str = "small"  # speech-to-text for "your face" videos: tiny | base | small | medium (bigger = better, slower)
     pexels_api_key: str = ""  # free key from pexels.com/api -> real footage behind video scenes
     pixabay_api_key: str = ""  # alternative footage source (free key: pixabay.com/api/docs) when Pexels is unavailable
     public_base_url: str = ""  # optional; without it Instagram images are hosted via the linked Facebook Page
     publish_provider: str = "manual"  # manual | dryrun (real platform providers plug in here)
     publish_poll_interval_s: float = 5.0
+    metrics_refresh_hours: float = 6.0  # how often results of published Meta posts are fetched (0 = never)
     publish_default_time: str = "19:00"  # local project time
     publish_max_attempts: int = 3
     auto_migrate: bool = True  # sqlite only: create/upgrade tables on startup

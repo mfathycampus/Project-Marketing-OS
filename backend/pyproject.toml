@@ -25,6 +25,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx>=0.27"]
+ugc = ["faster-whisper>=1.0"]  # speech-to-text for "your face" videos (installed by start.bat when possible)
 
 [tool.setuptools.packages.find]
 include = ["app*"]
