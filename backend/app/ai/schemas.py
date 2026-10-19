@@ -40,6 +40,10 @@ class DesignSpec(BaseModel):
         default_factory=list,
         description="Only when media_type is video and <media_library> is given: per video scene the id of the "
                     "library item (app screenshot/recording) that shows what the scene says, or an empty string.")
+    video_stats: list[str] = Field(
+        default_factory=list,
+        description="Only when media_type is video: per video scene an animated statistic 'value|label' "
+                    "(e.g. '5|ساعات توفرها أسبوعيًا') using ONLY numbers present in the context, or an empty string.")
 
     @field_validator("fields", mode="before")
     @classmethod

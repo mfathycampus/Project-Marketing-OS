@@ -221,14 +221,16 @@ function EditModal({ it, onClose, onSaved }) {
   const isVideo = it.media_type === "video";
   const lines = (k) => ((it.design || {})[k] || []).join("\n");
   const [f, setF] = useState({ headline: it.headline, caption: it.caption, cta: it.cta, planned_date: it.planned_date || "",
-    video_scenes: lines("video_scenes"), video_broll: lines("video_broll"), video_media: [...((it.design || {}).video_media || [])] });
+    video_scenes: lines("video_scenes"), video_broll: lines("video_broll"), video_media: [...((it.design || {}).video_media || [])],
+    video_stats: [...((it.design || {}).video_stats || [])] });
   const [media] = useFetch("/media");
   const save = async (e) => {
     e.preventDefault();
     const split = (t) => t.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 6);
     const body = { ...f, planned_date: f.planned_date || null, video_scenes: split(f.video_scenes), video_broll: split(f.video_broll) };
     body.video_media = body.video_scenes.map((_, i) => f.video_media[i] || "");
-    if (!isVideo) { delete body.video_scenes; delete body.video_broll; delete body.video_media; }
+    body.video_stats = body.video_scenes.map((_, i) => f.video_stats[i] || "");
+    if (!isVideo) { delete body.video_scenes; delete body.video_broll; delete body.video_media; delete body.video_stats; }
     await api(`/content-items/${it.id}`, { method: "PATCH", body });
     onSaved();
   };
@@ -238,11 +240,12 @@ function EditModal({ it, onClose, onSaved }) {
     <p><label>النص</label><textarea value=${f.caption} onInput=${(e) => setF({ ...f, caption: e.target.value })}></textarea></p>
     <p><label>زر الدعوة</label><input maxlength="100" value=${f.cta} onInput=${(e) => setF({ ...f, cta: e.target.value })} /></p>
     <p><label>تاريخ النشر</label><input type="date" value=${f.planned_date} onInput=${(e) => setF({ ...f, planned_date: e.target.value })} /></p>
-    ${isVideo && html`<p><label>مشاهد الفيديو (سطر لكل مشهد، حتى 6)</label><textarea rows="4" value=${f.video_scenes} onInput=${(e) => setF({ ...f, video_scenes: e.target.value })}></textarea></p>
-      ${media && media.length > 0 && html`<p><label>لقطة التطبيق لكل مشهد (تظهر داخل هاتف)</label>
+    ${isVideo && html`<p><label>مشاهد الفيديو (سطر لكل مشهد، حتى 6). ضع *نجمتين* حول الكلمة المهمة</label><textarea rows="4" value=${f.video_scenes} onInput=${(e) => setF({ ...f, video_scenes: e.target.value })}></textarea></p>
+      <p><label>لكل مشهد: رقم متحرك (اختياري، مثل 5|ساعات توفرها)${media && media.length ? " ولقطة تطبيق داخل هاتف" : ""}</label>
         ${f.video_scenes.split("\n").filter((x) => x.trim()).slice(0, 6).map((sc, i) => html`<div class="row" style="align-items:center;margin-bottom:6px">
           <span class="muted" style="flex:1;min-width:120px">${i + 1}. ${sc.slice(0, 40)}</span>
-          <${MediaPicker} value=${f.video_media[i]} media=${media} onChange=${(v) => { const vm = [...f.video_media]; vm[i] = v; setF({ ...f, video_media: vm }); }} /></div>`)}</p>`}
+          <input style="flex:0 0 170px" value=${f.video_stats[i] || ""} placeholder="رقم|وصف" onInput=${(e) => { const vs = [...f.video_stats]; vs[i] = e.target.value; setF({ ...f, video_stats: vs }); }} />
+          <${MediaPicker} value=${f.video_media[i]} media=${media} onChange=${(v) => { const vm = [...f.video_media]; vm[i] = v; setF({ ...f, video_media: vm }); }} /></div>`)}</p>
       <p><label>لقطات الخلفية: كلمات بحث إنجليزية (سطر لكل مشهد، مثل: woman typing laptop office)</label><textarea rows="4" dir="ltr" value=${f.video_broll} onInput=${(e) => setF({ ...f, video_broll: e.target.value })}></textarea></p>`}
     <p class="muted">بعد التعديل أعد توليد التصميم ليظهر النص الجديد عليه.</p>
     <div class="actions"><button class="primary">حفظ</button><button type="button" onClick=${onClose}>إلغاء</button></div>
@@ -417,6 +420,7 @@ function BrandBrain({ pid }) {
   const [aud, setAud] = useState(null);
   const [prod, setProd] = useState({ name: "", price: "", description: "", features: "" });
   const [rule, setRule] = useState({ kind: "forbidden_word", text: "" });
+  const [media] = useFetch("/media");
   useEffect(() => { if (bb) { setBrand(bb.brand || { name: "", description: "", mission: "", tone: "", language: "ar", dialect: "", primary_color: "#0F766E", secondary_color: "#F59E0B" }); setAud(bb.audience || { demographics: "", interests: [], pain_points: [], goals: [] }); } }, [bb && bb.products.length, bb && bb.rules.length, bb === null]);
   if (!bb || !brand || !aud) return html`<${Busy} text="تحميل..." />`;
   const split = (s) => s.split(/[،,\n]/).map((x) => x.trim()).filter(Boolean);
@@ -433,6 +437,7 @@ function BrandBrain({ pid }) {
         <div class="field"><label>اللهجة</label><input value=${brand.dialect} onInput=${(e) => B("dialect", e.target.value)} placeholder="خليجي، فصحى مبسطة" /></div>
         <div class="field" style="max-width:120px"><label>اللون الأساسي</label><input type="color" value=${brand.primary_color} onInput=${(e) => B("primary_color", e.target.value)} /></div>
         <div class="field" style="max-width:120px"><label>اللون الثانوي</label><input type="color" value=${brand.secondary_color} onInput=${(e) => B("secondary_color", e.target.value)} /></div>
+        <${LogoPicker} value=${brand.logo_media_id} media=${media} onChange=${(v) => B("logo_media_id", v)} />
       </div>
       <p><label>وصف النشاط</label><textarea value=${brand.description} onInput=${(e) => B("description", e.target.value)}></textarea></p>
       <p><label>الرسالة</label><input value=${brand.mission} onInput=${(e) => B("mission", e.target.value)} /></p>
@@ -471,6 +476,17 @@ function MediaPicker({ value, onChange, media }) {
       <option value="">📱 بدون لقطة تطبيق</option>
       ${media.map((m) => html`<option value=${m.id}>${m.kind === "video" ? "🎬" : "🖼️"} ${(m.description || m.filename).slice(0, 40)}</option>`)}
     </select></div></div>`;
+}
+
+function LogoPicker({ value, onChange, media }) {
+  const images = (media || []).filter((m) => m.kind === "image");
+  return html`<div class="field" style="flex:0 0 240px"><label>الشعار (من <a href="#/media">مكتبة الوسائط</a>)</label>
+    <div class="row" style="gap:6px;align-items:center;flex-wrap:nowrap">
+      ${value && html`<img src=${`${API}/media/${value}/poster`} alt="" style="height:38px;max-width:90px;object-fit:contain;border-radius:6px;background:#0002" />`}
+      <select value=${value || ""} onChange=${(e) => onChange(e.target.value || null)}>
+        <option value="">بدون شعار</option>
+        ${images.map((m) => html`<option value=${m.id}>${(m.description || m.filename).slice(0, 40)}</option>`)}
+      </select></div></div>`;
 }
 
 function MediaLibraryPage() {
@@ -517,7 +533,7 @@ function MediaLibraryPage() {
 }
 
 /* ---------- Video studio: prompt -> script -> video -> export ---------- */
-const EMPTY_SCRIPT = { title: "", brand_name: "", scenes: [""], broll: [""], media: [""], cta: "" };
+const EMPTY_SCRIPT = { title: "", brand_name: "", scenes: [""], broll: [""], media: [""], stats: [""], cta: "" };
 
 function Studio() {
   const [opt] = useFetch("/studio/options");
@@ -531,6 +547,7 @@ function Studio() {
   const [captions, setCaptions] = useState(true);
   const [footage, setFootage] = useState(true);
   const [colors, setColors] = useState({ primary_color: "#0F766E", secondary_color: "#F59E0B" });
+  const [logo, setLogo] = useState(null);
   const [busy, setBusy] = useState("");
 
   const working = (videos || []).some((v) => v.status === "queued" || v.status === "rendering");
@@ -544,13 +561,13 @@ function Studio() {
     try { setScript(await api("/studio/script", { method: "POST", body: { prompt, aspect, length } })); } catch {} finally { setBusy(""); }
   };
   const setScene = (i, k, v) => setScript((s) => { const n = { ...s, [k]: [...(s[k] || [])] }; n[k][i] = v; return n; });
-  const addScene = () => setScript((s) => ({ ...s, scenes: [...s.scenes, ""], broll: [...s.broll, ""], media: [...(s.media || []), ""] }));
+  const addScene = () => setScript((s) => ({ ...s, scenes: [...s.scenes, ""], broll: [...s.broll, ""], media: [...(s.media || []), ""], stats: [...(s.stats || []), ""] }));
   const delScene = (i) => setScript((s) => ({ ...s, scenes: s.scenes.filter((_, j) => j !== i), broll: s.broll.filter((_, j) => j !== i),
-    media: (s.media || []).filter((_, j) => j !== i) }));
+    media: (s.media || []).filter((_, j) => j !== i), stats: (s.stats || []).filter((_, j) => j !== i) }));
   const make = async () => {
     setBusy("video");
     try {
-      await api("/studio/videos", { method: "POST", body: { ...script, title: script.title || prompt.slice(0, 50) || "فيديو", aspect, voice: curVoice, captions, footage, ...colors } });
+      await api("/studio/videos", { method: "POST", body: { ...script, title: script.title || prompt.slice(0, 50) || "فيديو", aspect, voice: curVoice, captions, footage, ...colors, logo: logo || "" } });
       toastSetter("بدأ إنشاء الفيديو — يظهر التقدم بالأسفل", true);
       reload();
     } catch {} finally { setBusy(""); }
@@ -578,10 +595,11 @@ function Studio() {
         <div class="field"><label>اسم العلامة (يظهر أعلى الفيديو)</label><input value=${script.brand_name} onInput=${(e) => setScript({ ...script, brand_name: e.target.value })} /></div>
       </div>
       <ol class="scenes">${script.scenes.map((sc, i) => html`<li>
-        <textarea class="scene" value=${sc} maxlength="200" onInput=${(e) => setScene(i, "scenes", e.target.value)} placeholder="نص المشهد (يُقال بالصوت ويظهر على الشاشة)"></textarea>
+        <textarea class="scene" value=${sc} maxlength="200" onInput=${(e) => setScene(i, "scenes", e.target.value)} placeholder="نص المشهد (يُقال بالصوت ويظهر على الشاشة). ضع *نجمتين* حول الكلمة المهمة لتظهر بلون التمييز"></textarea>
         <div class="row">
           <div class="field"><input dir="ltr" value=${script.broll[i] || ""} onInput=${(e) => setScene(i, "broll", e.target.value)} placeholder="stock footage search (English)" title="كلمات البحث عن لقطة الخلفية" /></div>
           <${MediaPicker} value=${(script.media || [])[i]} onChange=${(v) => setScene(i, "media", v)} media=${media} />
+          <div class="field" style="flex:0 0 200px"><input value=${(script.stats || [])[i] || ""} onInput=${(e) => setScene(i, "stats", e.target.value)} placeholder="رقم متحرك: 5|ساعات توفرها" title="اختياري: رقم يعدّ تصاعديًا مع وصف، مثل 5|ساعات توفرها أسبوعيًا أو +80%|أسرع" /></div>
           ${script.scenes.length > 1 && html`<button type="button" class="danger" onClick=${() => delScene(i)}>حذف</button>`}
         </div></li>`)}</ol>
       ${script.scenes.length < 12 && html`<button type="button" onClick=${addScene}>+ مشهد</button>`}
@@ -592,6 +610,7 @@ function Studio() {
           ${opt.voice_engine && Object.entries(opt.voices).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>
         <div class="field" style="flex:0 0 auto"><label>لون أساسي</label><input type="color" value=${colors.primary_color} onInput=${(e) => setColors({ ...colors, primary_color: e.target.value })} /></div>
         <div class="field" style="flex:0 0 auto"><label>لون التمييز</label><input type="color" value=${colors.secondary_color} onInput=${(e) => setColors({ ...colors, secondary_color: e.target.value })} /></div>
+        <${LogoPicker} value=${logo} media=${media} onChange=${setLogo} />
       </div>
       <div class="row" style="margin-top:8px">
         <label class="check"><input type="checkbox" checked=${captions} onChange=${(e) => setCaptions(e.target.checked)} /> ترجمة متزامنة مع الصوت (الكلمة المنطوقة مميزة)</label>

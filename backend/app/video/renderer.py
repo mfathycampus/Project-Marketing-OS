@@ -5,13 +5,14 @@ animated frame by frame (fade/slide-in, drifting light, progress bar, pulsing CT
 FFmpeg comes from the imageio-ffmpeg wheel, so `pip install` is enough on Windows too.
 """
 import hashlib
+import re
 import logging
 import math
 import os
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable
 
@@ -53,6 +54,8 @@ class VideoRequest:
     broll: list[str] = field(default_factory=list)  # Pexels search term per scene; empty = brand gradient
     captions: bool = True  # with narration: words appear in short groups synced to the voice, spoken word highlighted
     media: list[str] = field(default_factory=list)  # per scene: path of an app screenshot/recording ('' = none)
+    stats: list[str] = field(default_factory=list)  # per scene: "value|label" (e.g. "5|ساعات توفرها") -> animated stat
+    logo: str = ""  # path of the brand logo (PNG with transparency is best); replaces the brand name, big on the CTA
 
 
 @dataclass
@@ -120,6 +123,69 @@ def _scene_seconds(text: str) -> float:
 
 
 TRANSITION = 0.3  # seconds of zoom-through crossfade at each scene change
+EMPH = re.compile(r"\*([^*]+)\*")
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩٫", "0123456789.")
+_PUNCT = ".,!?؟،:;…«»\"'()"
+
+
+def _bare(word: str) -> str:
+    return word.strip(_PUNCT)
+
+
+def parse_emphasis(text: str) -> tuple[str, set[str]]:
+    """'وفّر *ساعات* أسبوعيًا' -> ('وفّر ساعات أسبوعيًا', {'ساعات'}). Marked words are drawn in the accent colour."""
+    words = {_bare(x) for span in EMPH.findall(text) for x in span.split()}
+    return text.replace("*", "").strip(), {x for x in words if x}
+
+
+def parse_stat(spec: str):
+    """'+80%|أسرع في التوثيق' -> (prefix '+', 80.0, decimals 0, suffix '%', label, arabic_digits) or None."""
+    if not spec or "|" not in spec:
+        value, label = (spec or "").strip(), ""
+    else:
+        value, label = (x.strip() for x in spec.split("|", 1))
+    m = re.search(r"\d+(?:[.,٫]\d+)?", value.translate(_AR_DIGITS))
+    if not value or not m:
+        return None
+    num = m.group(0).replace(",", ".")
+    return (value.translate(_AR_DIGITS)[: m.start()], float(num), len(num.split(".")[1]) if "." in num else 0,
+            value.translate(_AR_DIGITS)[m.end():], label, any(c in "٠١٢٣٤٥٦٧٨٩" for c in value))
+
+
+def _stat_text(stat, p: float) -> str:
+    prefix, target, decimals, suffix, _, arabic = stat
+    v = target * p
+    txt = f"{v:.{decimals}f}" if decimals else f"{int(round(v)):,}" if target >= 10000 else f"{int(round(v))}"
+    if arabic:
+        txt = txt.translate(str.maketrans("0123456789.,", "٠١٢٣٤٥٦٧٨٩٫٬"))
+    return f"{prefix}{txt}{suffix}"
+
+
+def load_logo(path: str, max_w: int, max_h: int) -> Image.Image | None:
+    """Logo fitted into max_w x max_h; logos without transparency get rounded corners so they look like a badge."""
+    try:
+        with Image.open(path) as im:
+            im = im.convert("RGBA")
+    except Exception:  # noqa: BLE001 - a broken logo must not break the video
+        return None
+    im.thumbnail((max_w, max_h), Image.LANCZOS)
+    if im.getchannel("A").getextrema()[0] == 255:  # fully opaque
+        mask = Image.new("L", im.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, im.width - 1, im.height - 1), int(min(im.size) * 0.18), fill=255)
+        im.putalpha(mask)
+    shadow = Image.new("RGBA", (im.width + 40, im.height + 40), (0, 0, 0, 0))
+    a = Image.new("L", shadow.size, 0)
+    a.paste(im.getchannel("A").point(lambda v: int(v * 0.45)), (20, 26))
+    shadow.putalpha(a.filter(ImageFilter.GaussianBlur(10)))
+    shadow.alpha_composite(im, (20, 20))
+    return shadow
+
+
+def _stack(top: Image.Image, bottom: Image.Image, gap: int) -> Image.Image:
+    out = Image.new("RGBA", (max(top.width, bottom.width), top.height + gap + bottom.height), (0, 0, 0, 0))
+    out.alpha_composite(top, ((out.width - top.width) // 2, 0))
+    out.alpha_composite(bottom, ((out.width - bottom.width) // 2, top.height + gap))
+    return out
 
 
 def _mix(a, b, k: float):
@@ -261,10 +327,17 @@ class VideoRenderer:
         shade = bg.convert("RGBA")  # brand-tinted darkening over footage keeps the text readable
         shade.putalpha(165)
         glow = self._glow(int(w * 0.9), secondary)
-        brand = self._layer(w, Block(req.brand_name, 44, alpha=0.85), req.rtl, margin) if req.brand_name else None
+        parsed = [parse_emphasis(t) for t in req.scenes]
+        emph = [e for _, e in parsed]
+        req = replace(req, scenes=[t for t, _ in parsed], cta=parse_emphasis(req.cta)[0])  # voice reads clean text
+        stats = [parse_stat(req.stats[i]) if i < len(req.stats) else None for i in range(len(req.scenes))]
+        logo_small = load_logo(req.logo, int(w * 0.32), int(min(w, h) * 0.085)) if req.logo else None
+        logo_big = load_logo(req.logo, int(w * 0.5), int(min(w, h) * 0.2)) if req.logo else None
+        brand = logo_small or (self._layer(w, Block(req.brand_name, 44, alpha=0.85), req.rtl, margin) if req.brand_name else None)
 
         durs, narration, scene_words = self._timeline(req)
-        media = [(req.media[i] if i < len(req.media) else "") or "" for i in range(len(req.scenes))]
+        media = [((req.media[i] if i < len(req.media) else "") or "") if not stats[i] else ""
+                 for i in range(len(req.scenes))]  # a stat scene is about the number, not the app
         geo = _phone_layout(w, h, margin, req.rtl)
         # per scene: (text centre x, text centre y, text width, text max height); scenes with app media leave room
         boxes = [(geo["text"] if m else (w // 2, h // 2, w - 2 * margin, int(h * 0.6))) for m in media]
@@ -277,7 +350,13 @@ class VideoRenderer:
             block = (Block(text, int(76 * k), True, ink, line_height=1.25, pill=secondary, pad=(34, 80), align="center")
                      if is_cta else Block(text, int((112 if i == 0 else 84) * k), True, white, line_height=1.3,
                                           align="center"))
-            layers.append((self._layer(tw + 2 * margin, block, req.rtl, margin, max_h=th), dur, is_cta))
+            if emph[i] and not is_cta:
+                lay = self._rich_layer(text, emph[i], int((112 if i == 0 else 84) * k), secondary, tw, margin, req.rtl, th)
+            else:
+                lay = self._layer(tw + 2 * margin, block, req.rtl, margin, max_h=th)
+            if is_cta and logo_big is not None:
+                lay = _stack(logo_big, lay, 50)
+            layers.append((lay, dur, is_cta))
 
         total = sum(d for _, d, _ in layers)
         # synced captions: per scene, word groups timed on the scene's own clock (None = static scene text)
@@ -285,7 +364,7 @@ class VideoRenderer:
         captions, at = [], 0.0
         for i, (text, (_, dur, is_cta)) in enumerate(zip(req.scenes, layers)):
             g = None
-            if scene_words[i] and req.captions and not is_cta:
+            if scene_words[i] and req.captions and not is_cta and not stats[i]:
                 g = self._word_groups(scene_words[i], boxes[i][2], int((112 if i == 0 else 84) * sizes_k[i]), req.rtl) or None
             if g:
                 captions += [(at + a, at + min(b, dur), " ".join(x[2] for x in ws)) for a, b, ws in g]
@@ -344,9 +423,12 @@ class VideoRenderer:
                                 if shot is not None:
                                     base = Image.alpha_composite(shot.convert("RGBA"), shade)
                             lay, enter_t, quick = layer, t, False
-                            if groups[idx]:
+                            if stats[idx]:
+                                lay = self._stat_layer(stats[idx], t, cache, secondary, w, h, req.rtl)
+                            elif groups[idx]:
                                 lay, enter_t, quick = self._caption_at(groups[idx], t, cache, idx == 0, secondary,
-                                                                       tw + 2 * margin, margin, req.rtl, sizes_k[idx])
+                                                                       tw + 2 * margin, margin, req.rtl, sizes_k[idx],
+                                                                       emph[idx])
                             frame = self._frame(base, glow, brand, lay, t, dur, (start + t) / total, is_cta,
                                                 secondary, w, h, margin, last=idx == len(layers) - 1,
                                                 enter_t=enter_t, quick=quick, center=(cx, cy),
@@ -457,18 +539,19 @@ class VideoRenderer:
             out.append(cur)
         return [(g[0][0], out[i + 1][0][0] if i + 1 < len(out) else g[-1][1], g) for i, g in enumerate(out)]
 
-    def _caption_at(self, groups, t, cache, first, secondary, w, margin, rtl, size_k=1.0):
+    def _caption_at(self, groups, t, cache, first, secondary, w, margin, rtl, size_k=1.0, emph=None):
         """(layer, seconds since this group appeared, quick) at scene time t; the spoken word is highlighted."""
         gi = max([i for i, (a, _, _) in enumerate(groups) if t >= a] or [0])
         a, _, ws = groups[gi]
         active = max([j for j, (s, _, _) in enumerate(ws) if t >= s] or [-1])
         if (gi, active) not in cache:
             cache[(gi, active)] = self._caption_layer([x[2] for x in ws], active, int((112 if first else 84) * size_k),
-                                                      secondary, w, margin, rtl)
+                                                      secondary, w, margin, rtl, emph=emph)
         return cache[(gi, active)], (t if gi == 0 else t - a), gi > 0
 
     @staticmethod
-    def _caption_layer(words: list[str], active: int, size: int, hi, w: int, margin: int, rtl: bool) -> Image.Image:
+    def _caption_layer(words: list[str], active: int, size: int, hi, w: int, margin: int, rtl: bool,
+                       emph: set[str] | None = None, shrink: bool = True) -> Image.Image:
         """One line of words; the active one sits on a brand-colour pill. Words are shaped one by one so the
         highlight lands on the right word in RTL text."""
         probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
@@ -478,7 +561,7 @@ class VideoRenderer:
             widths = [probe.textlength(sx, font=font, **kw) for sx, kw in shaped]
             gap = probe.textlength(" ", font=font) * 1.3
             total = sum(widths) + gap * (len(words) - 1)
-            if total <= w - 2 * margin:
+            if total <= w - 2 * margin or not shrink:
                 break
             font = _font(max(12, int(font.size * (w - 2 * margin) / total)), True)
         hh = int(font.size * 1.5)
@@ -489,14 +572,76 @@ class VideoRenderer:
             left = x - ww if rtl else x
             if j == active:
                 d.rounded_rectangle((left - 16, 16, left + ww + 16, hh + 24), radius=20, fill=(*hi, 240))
-            d.text((left, 20 + hh / 2), sx, font=font, anchor="lm",
-                   fill=(*_rgb(INK, INK), 255) if j == active else (255, 255, 255, 255), **kw)
+            colour = (*_rgb(INK, INK), 255) if j == active else (
+                (*hi, 255) if emph and _bare(words[j]) in emph else (255, 255, 255, 255))
+            d.text((left, 20 + hh / 2), sx, font=font, anchor="lm", fill=colour, **kw)
             x = x - ww - gap if rtl else x + ww + gap
         shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
         shadow.putalpha(img.getchannel("A").point(lambda v: int(v * 0.5)).filter(ImageFilter.GaussianBlur(10)))
         img = Image.alpha_composite(shadow, img)
         box = img.getbbox()
         return img.crop(box) if box else img
+
+    def _rich_layer(self, text: str, emph: set[str], size: int, hi, tw: int, margin: int, rtl: bool,
+                    max_h: int) -> Image.Image:
+        """Static scene text with the marked words in the accent colour (wrapped, centred, shrunk to fit)."""
+        probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+        words = text.split()
+        for _ in range(8):
+            font = _font(size, True)
+            gap = probe.textlength(" ", font=font) * 1.3
+            lines, cur, cur_w = [], [], 0.0
+            for wd in words:
+                sx, kw = _shape(wd, rtl)
+                ww = probe.textlength(sx, font=font, **kw)
+                if cur and cur_w + gap + ww > tw:
+                    lines.append(cur)
+                    cur, cur_w = [], 0.0
+                cur_w = cur_w + (gap if cur else 0) + ww
+                cur.append(wd)
+            if cur:
+                lines.append(cur)
+            imgs = [self._caption_layer(ln, -1, size, hi, tw + 2 * margin, margin, rtl, emph=emph, shrink=False)
+                    for ln in lines]
+            height = sum(im.height for im in imgs) - 30 * (len(imgs) - 1)
+            if height <= max_h or size < 40:
+                break
+            size = int(size * 0.9)
+        out = imgs[0]
+        for im in imgs[1:]:
+            out = _stack(out, im, -30)
+        return out
+
+    def _stat_layer(self, stat, t: float, cache: dict, hi, w: int, h: int, rtl: bool) -> Image.Image:
+        """Animated stat: the number counts up inside a filling ring, the label sits underneath."""
+        p = _ease_out(max(0.0, t - 0.15) / 1.3)
+        pop = 0.75 + 0.25 * _ease_back(t / 0.5)  # spring-in
+        key = ("stat", _stat_text(stat, p), round(p, 2), round(pop, 2))
+        if key in cache:
+            return cache[key]
+        side = int(min(w, h) * 0.62)
+        size = int(side * 0.30)
+        img = Image.new("RGBA", (side + 40, side + 40), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img, "RGBA")
+        box = (20 + 14, 20 + 14, 20 + side - 14, 20 + side - 14)
+        d.ellipse(box, outline=(255, 255, 255, 55), width=22)
+        if p > 0:
+            d.arc(box, -90, -90 + 360 * p, fill=(*hi, 255), width=22)
+        txt = _stat_text(stat, p)
+        font = _font(size, True)
+        while d.textlength(txt, font=font) > side * 0.78 and size > 30:
+            size = int(size * 0.9)
+            font = _font(size, True)
+        sx, kw = _shape(txt, rtl)
+        d.text((img.width / 2, img.height / 2), sx, font=font, anchor="mm", fill=(255, 255, 255, 255), **kw)
+        if stat[4]:  # label
+            label = self._layer(w, Block(stat[4], int(min(w, h) * 0.06), True, (255, 255, 255), line_height=1.3,
+                                         align="center"), rtl, 90, max_h=int(h * 0.2))
+            img = _stack(img, label, 30)
+        if pop < 0.999:
+            img = img.resize((max(1, int(img.width * pop)), max(1, int(img.height * pop))), Image.BILINEAR)
+        cache[key] = img
+        return img
 
     # ---------- drawing ----------
     @staticmethod

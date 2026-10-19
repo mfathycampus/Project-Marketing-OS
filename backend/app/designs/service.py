@@ -37,6 +37,7 @@ class DesignService:
             primary_color=brand.primary_color if brand else "#0F766E",
             secondary_color=brand.secondary_color if brand else "#F59E0B",
             brand_name=brand.name if brand else project.name,
+            logo=get_library().resolve(getattr(brand, "logo_media_id", None)) or "",
         )
         video = self._video_request(item, values, req) if item.media_type == "video" else None
         digest = hashlib.sha256(
@@ -54,7 +55,8 @@ class DesignService:
                             secondary_color=req.secondary_color, aspect=PLATFORM_ASPECT.get(item.platform, "9:16"),
                             music_seed=str(item.id), voice=voice.current_voice(),
                             broll=[q for q in item.design.get("video_broll") or [] if q.strip()] if broll.enabled() else [],
-                            media=[get_library().resolve(m) or "" for m in item.design.get("video_media") or []])
+                            media=[get_library().resolve(m) or "" for m in item.design.get("video_media") or []],
+                            stats=list(item.design.get("video_stats") or []), logo=req.logo)
 
     def enqueue(self, item_id: uuid.UUID) -> DesignJob:
         """Create (or reuse) a design job and mark the item DESIGN_PENDING. Rendering happens in run_job."""

@@ -37,7 +37,7 @@ class AIOrchestrator:
         if project is None:
             raise LookupError("project not found")
 
-        instructions, prompt_version = _load_prompt("campaign.v4")
+        instructions, prompt_version = _load_prompt("campaign.v5")
         ctx = build_campaign_context(self.session, project, req.brief)
         forbidden = [r.text.lower() for r in project.rules if r.kind == "forbidden_word"]
         user_message = (
@@ -206,7 +206,7 @@ class AIOrchestrator:
             if it.media_type == "video":
                 if not 1 <= len(it.design.video_scenes) <= VIDEO_SCENES_MAX:
                     raise ValueError(f"video item needs 1-{VIDEO_SCENES_MAX} video_scenes")
-                if any(len(x) > VIDEO_SCENE_MAX for x in it.design.video_scenes):
+                if any(len(x.replace("*", "")) > VIDEO_SCENE_MAX for x in it.design.video_scenes):
                     raise ValueError(f"each video scene must be at most {VIDEO_SCENE_MAX} characters")
             text = f"{it.headline} {it.caption} {it.cta}".lower()
             for word in forbidden:

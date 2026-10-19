@@ -18,6 +18,7 @@ class BrandProfileIn(BaseModel):
     dialect: str = ""
     primary_color: str = Field(default="#0F766E", pattern="^#[0-9A-Fa-f]{6}$")
     secondary_color: str = Field(default="#F59E0B", pattern="^#[0-9A-Fa-f]{6}$")
+    logo_media_id: str | None = Field(default=None, max_length=40)  # image from the media library
 
 
 class AudienceIn(BaseModel):
@@ -123,6 +124,7 @@ class ContentPatch(BaseModel):
     video_scenes: list[str] | None = Field(default=None, max_length=6)  # on-screen lines (stored in design)
     video_broll: list[str] | None = Field(default=None, max_length=6)  # English Pexels search terms per scene
     video_media: list[str] | None = Field(default=None, max_length=6)  # media-library id per scene ('' = none)
+    video_stats: list[str] | None = Field(default=None, max_length=6)  # "value|label" per scene ('' = none)
 
 
 class RejectIn(BaseModel):
