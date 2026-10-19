@@ -39,6 +39,8 @@ class DesignService:
             brand_name=brand.name if brand else project.name,
             logo=get_library().resolve(getattr(brand, "logo_media_id", None)) or "",
             video_style=getattr(brand, "video_style", None) or "modern",
+            website=getattr(brand, "website", "") or "",
+            offer=getattr(brand, "offer", "") or "",
         )
         video = self._video_request(item, values, req) if item.media_type == "video" else None
         digest = hashlib.sha256(
@@ -59,7 +61,8 @@ class DesignService:
                             media=[get_library().resolve(m) or "" for m in item.design.get("video_media") or []],
                             stats=list(item.design.get("video_stats") or []), logo=req.logo,
                             style=req.video_style, compare=list(item.design.get("video_compare") or []),
-                            media_focus=[get_library().focus_of(m) for m in item.design.get("video_media") or []])
+                            media_focus=[get_library().focus_of(m) for m in item.design.get("video_media") or []],
+                            end_url=req.website, end_offer=req.offer)
 
     def enqueue(self, item_id: uuid.UUID) -> DesignJob:
         """Create (or reuse) a design job and mark the item DESIGN_PENDING. Rendering happens in run_job."""

@@ -42,7 +42,7 @@ def test_scenes_fall_back_to_design_fields_and_end_with_cta():
 def test_renderer_makes_mp4_with_audio_in_platform_size():
     res = renderer.VideoRenderer().render(renderer.VideoRequest(["خصم اليوم", "اطلب الآن"], cta="اطلب الآن",
                                                                 brand_name="المذاق", aspect="1:1"))
-    assert b"ftyp" in res.mp4[:64] and (res.width, res.height) == (1080, 1080) and res.duration_ms > 4000
+    assert b"ftyp" in res.mp4[:64] and (res.width, res.height) == (1080, 1080) and res.duration_ms >= 3500
     probe = __import__("subprocess").run([renderer.ffmpeg_exe(), "-i", "-"], input=res.mp4, capture_output=True)
     info = probe.stderr.decode(errors="replace")
     assert "h264" in info and "aac" in info
@@ -229,8 +229,8 @@ def test_voiceover_sets_scene_length_and_mixes_with_music(monkeypatch, tmp_path)
                     str(music_dir / "t.wav")], check=True)
     monkeypatch.setattr(renderer, "MUSIC_DIR", music_dir)
     res = renderer.VideoRenderer().render(renderer.VideoRequest(["أ", "ب"], voice="ar-SA-HamedNeural"))
-    # each scene = 0.3 lead + 4.0 voice + 0.45 (> the 2.6s text minimum)
-    assert abs(res.duration_ms - 2 * 4750) <= 300
+    # each scene = 0.3 lead + 4.0 voice + 0.2 breath (tight pacing)
+    assert abs(res.duration_ms - 2 * 4500) <= 300
     info = subprocess.run([renderer.ffmpeg_exe(), "-i", "-"], input=res.mp4, capture_output=True).stderr.decode(errors="replace")
     assert "aac" in info
 
@@ -314,7 +314,7 @@ def test_edge_failure_renders_video_without_voice(monkeypatch):
 
     monkeypatch.setattr(voice, "synthesize", boom)
     res = renderer.VideoRenderer().render(renderer.VideoRequest(["أ"], voice="edge:ar-SA-HamedNeural"))
-    assert res.duration_ms >= 2600
+    assert res.duration_ms >= 2000
     with pytest.raises(voice.VoiceError):  # a configured paid provider failing is reported, not hidden
         renderer.VideoRenderer().render(renderer.VideoRequest(["أ"], voice="elevenlabs:VID"))
 

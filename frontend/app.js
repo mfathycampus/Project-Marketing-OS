@@ -440,6 +440,8 @@ function BrandBrain({ pid }) {
         <div class="field" style="max-width:120px"><label>اللون الأساسي</label><input type="color" value=${brand.primary_color} onInput=${(e) => B("primary_color", e.target.value)} /></div>
         <div class="field" style="max-width:120px"><label>اللون الثانوي</label><input type="color" value=${brand.secondary_color} onInput=${(e) => B("secondary_color", e.target.value)} /></div>
         <${LogoPicker} value=${brand.logo_media_id} media=${media} onChange=${(v) => B("logo_media_id", v)} />
+        <div class="field" style="flex:0 0 180px"><label>الموقع (للبطاقة الختامية)</label><input dir="ltr" value=${brand.website || ""} onInput=${(e) => B("website", e.target.value)} placeholder="maeen.app" /></div>
+        <div class="field" style="flex:0 0 200px"><label>العرض (اختياري)</label><input value=${brand.offer || ""} onInput=${(e) => B("offer", e.target.value)} placeholder="جرّب مجانًا 7 أيام" /></div>
         <div class="field" style="flex:0 0 180px"><label>قالب الفيديو</label><select value=${brand.video_style || "modern"} onChange=${(e) => B("video_style", e.target.value)}>
           <option value="modern">عصري (الافتراضي)</option><option value="calm">هادئ</option><option value="energetic">حماسي</option><option value="corporate">رسمي (خلفية فاتحة)</option></select></div>
       </div>
@@ -567,6 +569,9 @@ function Studio() {
   const [colors, setColors] = useState({ primary_color: "#0F766E", secondary_color: "#F59E0B" });
   const [logo, setLogo] = useState(null);
   const [style, setStyle] = useState("modern");
+  const remembered = (() => { try { return JSON.parse(localStorage.getItem("studio-end") || "{}"); } catch { return {}; } })();
+  const [endUrl, setEndUrl] = useState(remembered.url || "");
+  const [endOffer, setEndOffer] = useState(remembered.offer || "");
   const [busy, setBusy] = useState("");
 
   const working = (videos || []).some((v) => v.status === "queued" || v.status === "rendering");
@@ -587,7 +592,8 @@ function Studio() {
   const make = async () => {
     setBusy("video");
     try {
-      await api("/studio/videos", { method: "POST", body: { ...script, title: script.title || prompt.slice(0, 50) || "فيديو", aspect, voice: curVoice, captions, footage, ...colors, logo: logo || "", style } });
+      await api("/studio/videos", { method: "POST", body: { ...script, title: script.title || prompt.slice(0, 50) || "فيديو", aspect, voice: curVoice, captions, footage, ...colors, logo: logo || "", style, end_url: endUrl, end_offer: endOffer } });
+      try { localStorage.setItem("studio-end", JSON.stringify({ url: endUrl, offer: endOffer })); } catch {}
       toastSetter("بدأ إنشاء الفيديو — يظهر التقدم بالأسفل", true);
       reload();
     } catch {} finally { setBusy(""); }
@@ -632,6 +638,8 @@ function Studio() {
         <div class="field" style="flex:0 0 auto"><label>لون أساسي</label><input type="color" value=${colors.primary_color} onInput=${(e) => setColors({ ...colors, primary_color: e.target.value })} /></div>
         <div class="field" style="flex:0 0 auto"><label>لون التمييز</label><input type="color" value=${colors.secondary_color} onInput=${(e) => setColors({ ...colors, secondary_color: e.target.value })} /></div>
         <${LogoPicker} value=${logo} media=${media} onChange=${setLogo} />
+        <div class="field" style="flex:0 0 200px"><label>الرابط في البطاقة الختامية</label><input dir="ltr" value=${endUrl} onInput=${(e) => setEndUrl(e.target.value)} placeholder="maeen.app" /></div>
+        <div class="field" style="flex:0 0 220px"><label>العرض (اختياري)</label><input value=${endOffer} onInput=${(e) => setEndOffer(e.target.value)} placeholder="جرّب مجانًا 7 أيام" /></div>
         ${opt.styles && html`<div class="field" style="flex:0 0 180px"><label>القالب</label><select value=${style} onChange=${(e) => setStyle(e.target.value)}>
           ${Object.entries(opt.styles).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>`}
       </div>
@@ -672,6 +680,7 @@ function StudioCard({ v, opt, reload }) {
       : html`<div class="ph"><div style="width:100%"><${Busy} text=${v.status === "queued" ? "في الانتظار..." : `جارٍ الإنشاء ${Math.round((v.progress || 0) * 100)}%`} />
           <div class="bar"><span style=${{ width: `${Math.round((v.progress || 0) * 100)}%` }}></span></div></div></div>`}
     <h3>${v.title}</h3>
+    ${v.duration_ms > 35000 && html`<p class="error" style="max-height:none;font-size:13px">⏱️ ${(v.duration_ms / 1000).toFixed(0)} ثانية: أطول من المناسب للريلز (15–30 ث). قلّل المشاهد أو اختصر الجمل.</p>`}
     <p>${v.spec.aspect}${v.duration_ms ? ` · ${(v.duration_ms / 1000).toFixed(1)} ث` : ""}${v.spec.voice ? ` · ${opt.voices[v.spec.voice] || v.spec.voice}` : " · بدون صوت"}</p>
     ${v.status === "ready" && html`<div class="row" style="margin-bottom:10px">
       <div class="field"><label>الصيغة</label><select value=${fmt} onChange=${(e) => setFmt(e.target.value)}>${Object.entries(opt.formats).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>

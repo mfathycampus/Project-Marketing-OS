@@ -90,7 +90,7 @@ def test_synced_captions_and_srt(edge):
     assert all(b <= res.duration_ms / 1000 + 0.002 and a <= b for a, b, _ in res.captions)
     # one continuous take for the whole script (natural intonation), not a clip per scene
     assert [c[0] for c in FakeCommunicate.calls] == ["أ ب ت ث ج ح. اطلب."]
-    assert res.captions[2][0] == pytest.approx(renderer.VOICE_LEAD + 3.0 - 0.12)  # CTA cut follows its spoken word
+    assert res.captions[2][0] == pytest.approx(renderer.VOICE_LEAD + 3.0 - 0.1)  # CTA cut follows its spoken word
     plain = renderer.VideoRenderer().render(renderer.VideoRequest(
         ["واحد اثنين"], voice="edge:ar-EG-SalmaNeural", captions=False))
     assert [c[2] for c in plain.captions] == ["واحد اثنين"]

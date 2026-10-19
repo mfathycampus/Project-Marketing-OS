@@ -42,6 +42,8 @@ class BrandProfile(Base, IdMixin, TimestampMixin):
     secondary_color: Mapped[str] = mapped_column(String(9), default="#F59E0B")
     logo_media_id: Mapped[str | None] = mapped_column(String(40), nullable=True)  # media-library image
     video_style: Mapped[str] = mapped_column(String(20), default="modern", server_default="modern")  # themes.py
+    website: Mapped[str] = mapped_column(String(120), default="", server_default="")  # shown on the video end card
+    offer: Mapped[str] = mapped_column(String(120), default="", server_default="")  # e.g. "جرّب مجانًا 7 أيام"
 
     project: Mapped[Project] = relationship(back_populates="brand_profile")
 

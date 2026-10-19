@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     azure_speech_key: str = ""  # Azure AI Speech (free tier F0: 0.5M characters/month) -> Arabic voiceover
     azure_speech_region: str = ""  # e.g. westeurope / eastus / uaenorth (from the resource's "Keys and Endpoint")
     tts_voice: str = "ar-SA-HamedNeural"  # ar-SA-ZariyahNeural, ar-AE-FatimaNeural, ar-AE-HamdanNeural, ar-KW-FahedNeural ...
-    tts_rate: str = "+0%"  # speaking speed, e.g. +10%
+    tts_rate: str = "+8%"  # speaking speed; slightly fast reads better in short social video
     voice_provider: str = "auto"  # auto (elevenlabs > azure > edge) | elevenlabs | azure | edge | off
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = ""  # from your ElevenLabs "My Voices" (python -m app.video.voice lists them)

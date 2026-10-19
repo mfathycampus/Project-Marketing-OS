@@ -70,7 +70,7 @@ def test_phone_shows_the_screenshot(tmp_path):
     res = renderer.VideoRenderer().render(renderer.VideoRequest(["أ"], media=[str(shot)]))
     geo = renderer._phone_layout(1080, 1920, 90, True)
     px, py, pw, ph = geo["phone"]
-    frame = subprocess.run([renderer.ffmpeg_exe(), "-v", "error", "-i", "-", "-vf", "select=eq(n\\,8)", "-vframes", "1",
+    frame = subprocess.run([renderer.ffmpeg_exe(), "-v", "error", "-i", "-", "-vf", "select=eq(n\\,6)", "-vframes", "1",
                             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], input=res.mp4, capture_output=True).stdout
     x, y = px + pw // 2, py + ph // 2
     r, g, b = frame[(y * 1080 + x) * 3:(y * 1080 + x) * 3 + 3]

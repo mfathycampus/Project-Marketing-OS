@@ -60,6 +60,8 @@ class VideoRequest:
     style: str = "modern"  # ready-made look: modern | calm | energetic | corporate (see themes.py)
     compare: list[str] = field(default_factory=list)  # per scene: "before|after" -> animated before/after cards
     media_focus: list = field(default_factory=list)  # per scene: (x, y) in 0..1 = the spot to point/tap/zoom at, or None
+    end_url: str = ""  # shown big on the final card (e.g. maeen.app)
+    end_offer: str = ""  # optional offer line on the final card (e.g. "جرّب مجانًا 7 أيام")
 
 
 @dataclass
@@ -123,7 +125,8 @@ def _sentence(text: str) -> str:
 
 
 def _scene_seconds(text: str) -> float:
-    return max(2.6, min(5.0, 1.8 + 0.05 * len(text)))
+    """Silent scenes: long enough to read, short enough to keep the pace."""
+    return max(2.0, min(4.0, 1.3 + 0.045 * len(text)))
 
 
 TRANSITION = 0.3  # seconds of zoom-through crossfade at each scene change
@@ -352,12 +355,31 @@ def _media_size(path: str) -> tuple[int, int] | None:
         return None
 
 
+def _auto_focus(im: Image.Image) -> tuple[float, float]:
+    """Best guess of the interesting part of a screenshot: the window-sized area with the most detail (edges),
+    leaving out a thin border where toolbars and sidebars usually sit."""
+    small = im.convert("L").resize((96, max(8, int(96 * im.height / im.width))), Image.BILINEAR)
+    edges = small.filter(ImageFilter.FIND_EDGES)
+    W, H = edges.size
+    px = edges.load()
+    bw, bh = max(4, W // 3), max(4, H // 3)
+    best, at = -1, (0.5, 0.5)
+    for y in range(int(H * 0.08), H - bh - int(H * 0.04) + 1, 2):
+        for x in range(int(W * 0.05), W - bw - int(W * 0.05) + 1, 2):
+            score = sum(px[i, j] for j in range(y, y + bh, 2) for i in range(x, x + bw, 2))
+            if score > best:
+                best, at = score, ((x + bw / 2) / W, (y + bh / 2) / H)
+    return at
+
+
 def _browser_layout(w: int, h: int, margin: int, ar: float) -> dict:
-    """Desktop window for wide screenshots/recordings: text above, the window large below."""
+    """Desktop window for wide screenshots/recordings: text above, the window large below. In tall frames the window
+    is nearly square and almost full width, showing a readable part of the screen (the camera moves inside it)."""
     ar = max(1.2, min(2.2, ar))
     bar = int(min(w, h) * 0.05)
     if h > w:
-        bw = w - 80
+        ar = 1.08 if h >= w * 1.5 else 1.45  # 9:16 / 4:5
+        bw = w - 60
         bh = int(bw / ar) + bar
         py = (h - bh) // 2 + int(h * 0.1)
         text = (w // 2, (margin + 30 + py) // 2, w - 2 * margin, py - margin - 70)
@@ -400,6 +422,7 @@ class _Browser:
         md.rounded_rectangle((0, 0, self.sw - 1, self.sh - 1), r, fill=255)
         md.rectangle((0, 0, self.sw, r), fill=255)  # square top corners under the title bar
         self.cursor = None
+        self.explicit = self.focus is not None  # user-set point: pointer, click and highlight; auto point: zoom only
         self.reader, self.still = None, None
         if Path(path).suffix.lower() in VIDEO_EXT:
             self.reader = _ClipReader(Path(path), self.sw, self.sh, seconds)
@@ -407,14 +430,10 @@ class _Browser:
             from app.video.themes import cursor
 
             with Image.open(path) as im:
-                im = im.convert("RGB")
-                q = max(1.0, min(1.8, im.width / self.sw))  # keep detail for the zoom
-                tw, th = int(self.sw * q), int(self.sh * q)
-                k = max(tw / im.width, th / im.height)
-                big = im.resize((max(tw, int(im.width * k)), max(th, int(im.height * k))), Image.LANCZOS)
-                x0, y0 = (big.width - tw) // 2, (big.height - th) // 2
-                self.still = big.crop((x0, y0, x0 + tw, y0 + th))
-            if self.focus:
+                self.still = im.convert("RGB")  # full screenshot; the view (crop) moves over it
+            if self.focus is None:
+                self.focus = _auto_focus(self.still)
+            if self.explicit:
                 self.cursor = cursor(max(26, self.sw // 22))
 
     def _screen(self, t: float):
@@ -422,16 +441,18 @@ class _Browser:
             shot = self.reader.next()
             return (shot if shot is not None else Image.new("RGB", (self.sw, self.sh), (0, 0, 0))), None
         W, H = self.still.size
-        if self.focus:
-            p = _smooth((t - TAP_AT - 0.15) / max(0.6, self.seconds - TAP_AT - 0.6))
-            z, (fx, fy) = 1 + 0.6 * p, self.focus
-            cx, cy = W * (0.5 + (fx - 0.5) * p), H * (0.5 + (fy - 0.5) * p)
-        else:
-            z, fx, fy = 1 + 0.1 * _smooth(t / max(0.5, self.seconds)), 0.5, 0.5
-            cx, cy = W / 2, H / 2
-        cw, ch = W / z, H / z
+        fx, fy = self.focus
+        # base view = the largest window-shaped area of the screenshot, slid towards the focus point
+        scr_ar = self.sw / self.sh
+        bw, bh = (H * scr_ar, H) if W / H > scr_ar else (W, W / scr_ar)
+        start = TAP_AT + 0.15 if self.explicit else 0.5
+        p = _smooth((t - start) / max(0.6, self.seconds - start - 0.4))
+        z = 1 + (0.75 if self.explicit else 0.55) * p  # then push in on the important part
+        cw, ch = bw / z, bh / z
+        cx = W / 2 + (fx * W - W / 2) * (0.6 + 0.4 * p)
+        cy = H / 2 + (fy * H - H / 2) * (0.6 + 0.4 * p)
         x0, y0 = min(max(cx - cw / 2, 0), W - cw), min(max(cy - ch / 2, 0), H - ch)
-        frame = self.still.crop((int(x0), int(y0), int(x0 + cw), int(y0 + ch))).resize((self.sw, self.sh), Image.BILINEAR)
+        frame = self.still.crop((int(x0), int(y0), int(x0 + cw), int(y0 + ch))).resize((self.sw, self.sh), Image.LANCZOS)
         target = ((fx * W - x0) / cw * self.sw, (fy * H - y0) / ch * self.sh)
         return frame, target
 
@@ -440,6 +461,14 @@ class _Browser:
         screen, target = self._screen(t)
         ox, oy = self.pad, self.pad + self.bar
         img.paste(screen, (ox, oy), self.mask)
+        if self.explicit and target is not None and t > TAP_AT + 0.5:  # highlight box around the clicked spot
+            a = min(1.0, (t - TAP_AT - 0.5) / 0.3)
+            pulse = 1 + 0.04 * math.sin((t - TAP_AT) * 2 * math.pi / 1.1)
+            bw2, bh2 = self.sw * 0.30 * pulse, self.sh * 0.12 * pulse
+            x, y = ox + target[0], oy + target[1]
+            hl = getattr(self, "highlight", (245, 158, 11))
+            ImageDraw.Draw(img, "RGBA").rounded_rectangle((x - bw2 / 2, y - bh2 / 2, x + bw2 / 2, y + bh2 / 2),
+                                                          int(bh2 * 0.3), outline=(*hl, int(255 * a)), width=7)
         if self.cursor is not None and target is not None:
             start = (self.sw * 0.92, self.sh * 1.08)
             k = _smooth((t - 0.25) / (TAP_AT - 0.35))
@@ -580,6 +609,8 @@ class VideoRenderer:
                 lay = self._layer(tw + 2 * margin, block, req.rtl, margin, max_h=th, shadow=lk["shadow"])
             if is_cta and logo_big is not None:
                 lay = _stack(logo_big, lay, 50)
+            if is_cta and (req.end_url or req.end_offer):
+                lay, dur = self._end_card(lay, req, lk, w, h, margin), dur + 1.2  # time to read the link
             layers.append((lay, dur, is_cta))
 
         total = sum(d for _, d, _ in layers)
@@ -589,7 +620,9 @@ class VideoRenderer:
         for i, (text, (_, dur, is_cta)) in enumerate(zip(req.scenes, layers)):
             g = None
             if scene_words[i] and req.captions and not is_cta and not stats[i] and not compare[i]:
-                g = self._word_groups(scene_words[i], boxes[i][2], int((112 if i == 0 else 84) * sizes_k[i]), req.rtl) or None
+                g = self._word_groups(scene_words[i], boxes[i][2], int((112 if i == 0 else 96) * sizes_k[i]), req.rtl) or None
+                if g and not geos[i] and h > w:  # captions sit a little below the middle, like social captions
+                    boxes[i] = (boxes[i][0], int(h * 0.56), boxes[i][2], boxes[i][3])
             if g:
                 captions += [(at + a, at + min(b, dur), " ".join(x[2] for x in ws)) for a, b, ws in g]
             else:
@@ -635,6 +668,8 @@ class VideoRenderer:
                     reader = _ClipReader(path, w, h, dur) if path else None
                     dev_cls = {"phone": _Phone, "browser": _Browser}.get(devices[idx])
                     phone = dev_cls(media[idx], geos[idx], dur, focus[idx]) if dev_cls else None
+                    if phone is not None:
+                        phone.highlight = looks[idx]["pill"]
                     # the device slides in unless the same kind was already on screen
                     enters = phone is not None and not (idx > 0 and devices[idx - 1] == devices[idx])
                     cx, cy, tw, _ = boxes[idx]
@@ -653,7 +688,7 @@ class VideoRenderer:
                                     base = Image.alpha_composite(shot.convert("RGBA"), shade)
                             lay, enter_t, quick = layer, t, False
                             if stats[idx]:
-                                lay = self._stat_layer(stats[idx], t, cache, lk["pill"], w, h, req.rtl)
+                                lay = self._stat_layer(stats[idx], t, cache, lk["pill"], w, h, req.rtl, hook=idx == 0)
                             elif compare[idx] and not is_cta:
                                 lay = self._compare_layer(compare[idx], t, dur, cache, w, h, margin, req.rtl)
                                 enter_t = 10.0  # the cards animate themselves
@@ -666,7 +701,8 @@ class VideoRenderer:
                                                 last=idx == len(layers) - 1, enter_t=enter_t, quick=quick,
                                                 center=(cx, cy),
                                                 glow2=glow2 if reader is None and lk["glows"] >= 2 else None,
-                                                phone=phone.render(t, enters) if phone else None)
+                                                phone=phone.render(t, enters) if phone else None,
+                                                hook=idx == 0 and not compare[idx])
                             if prev_last is not None and t < tr:
                                 frame = _transition(kind, prev_last, frame, t / tr, w, h, req.rtl)
                             proc.stdin.write(frame.tobytes())
@@ -724,6 +760,8 @@ class VideoRenderer:
             wav = voice.synthesize(script, req.voice)
             secs = voice.wav_seconds(wav)
             times, per, at = voice.word_times(script, req.voice, secs), [], 0
+            wav, times = voice.compress_pauses(wav, times)  # tight pacing: no long silences between sentences
+            secs = voice.wav_seconds(wav)
             for text in req.scenes:
                 toks = text.split()
                 per.append([(a, b, tok) for (a, b, _), tok in zip(times[at:at + len(toks)], toks)])
@@ -731,16 +769,16 @@ class VideoRenderer:
             starts = [0.0]
             for k in range(1, n):  # text appears just before its first word is heard
                 first = per[k][0][0] if per[k] else secs
-                starts.append(max(starts[-1] + 0.8, VOICE_LEAD + first - 0.12))
-            end = max(VOICE_LEAD + secs + 0.9, starts[-1] + 2.2)
+                starts.append(max(starts[-1] + 0.7, VOICE_LEAD + first - 0.1))
+            end = max(VOICE_LEAD + secs + 0.45, starts[-1] + 1.4)
             durs = [b - a for a, b in zip(starts, starts[1:] + [end])]
             words = [[(VOICE_LEAD + a - s, VOICE_LEAD + b - s, tok) for a, b, tok in ws] for ws, s in zip(per, starts)]
             return durs, [(VOICE_LEAD, wav)], words
         durs, clips, words, at = [], [], [], 0.0
         for text in req.scenes:
-            wav = voice.synthesize(text, req.voice)
+            wav = voice.trim_silence(voice.synthesize(text, req.voice))
             secs = voice.wav_seconds(wav)
-            dur = max(_scene_seconds(text), VOICE_LEAD + secs + 0.45)
+            dur = max(1.3, VOICE_LEAD + secs + 0.2)
             clips.append((at + VOICE_LEAD, wav))
             words.append([(VOICE_LEAD + a, VOICE_LEAD + b, tok) for a, b, tok in voice.word_times(text, req.voice, secs)])
             durs.append(dur)
@@ -774,7 +812,7 @@ class VideoRenderer:
         a, _, ws = groups[gi]
         active = max([j for j, (s, _, _) in enumerate(ws) if t >= s] or [-1])
         if (gi, active) not in cache:
-            cache[(gi, active)] = self._caption_layer([x[2] for x in ws], active, int((112 if first else 84) * size_k),
+            cache[(gi, active)] = self._caption_layer([x[2] for x in ws], active, int((112 if first else 96) * size_k),
                                                       secondary, w, margin, rtl, emph=emph)
         return cache[(gi, active)], (t if gi == 0 else t - a), gi > 0
 
@@ -803,7 +841,9 @@ class VideoRenderer:
                 d.rounded_rectangle((left - 16, 16, left + ww + 16, hh + 24), radius=20, fill=(*hi, 240))
             colour = (*lk["pill_fg"], 255) if j == active else (
                 (*lk["emph"], 255) if emph and _bare(words[j]) in emph else (*lk["fg"], 255))
-            d.text((left, 20 + hh / 2), sx, font=font, anchor="lm", fill=colour, **kw)
+            stroke = max(2, font.size // 22) if lk["shadow"] and j != active else 0  # outline: readable on any frame
+            d.text((left, 20 + hh / 2), sx, font=font, anchor="lm", fill=colour, stroke_width=stroke,
+                   stroke_fill=(10, 14, 18, 200), **kw)
             x = x - ww - gap if rtl else x + ww + gap
         if lk["shadow"]:
             shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
@@ -841,6 +881,24 @@ class VideoRenderer:
         out = imgs[0]
         for im in imgs[1:]:
             out = _stack(out, im, gap)
+        return out
+
+    def _end_card(self, cta_layer: Image.Image, req: VideoRequest, lk: dict, w: int, h: int, margin: int) -> Image.Image:
+        """Final card: [logo] + call-to-action button + offer + the link, big and centred."""
+        out = cta_layer
+        if req.end_offer:
+            offer = self._layer(w, Block(req.end_offer, int(min(w, h) * 0.05), True, lk["fg"], line_height=1.3,
+                                         align="center"), req.rtl, margin, max_h=int(h * 0.12), shadow=lk["shadow"])
+            out = _stack(out, offer, 30)
+        if req.end_url:
+            url = req.end_url.strip().removeprefix("https://").removeprefix("http://").rstrip("/")
+            link = self._layer(w, Block(url, int(min(w, h) * 0.075), True, lk["fg"], line_height=1.2, align="center"),
+                               False, margin, max_h=int(h * 0.1), shadow=lk["shadow"])
+            bar = Image.new("RGBA", (link.width, link.height + 22), (0, 0, 0, 0))
+            bar.alpha_composite(link, (0, 0))
+            ImageDraw.Draw(bar).rounded_rectangle((int(link.width * 0.1), link.height + 6, int(link.width * 0.9),
+                                                   link.height + 16), 5, fill=(*lk["pill"], 255))
+            out = _stack(out, bar, 40)
         return out
 
     def _compare_layer(self, spec, t: float, dur: float, cache: dict, w: int, h: int, margin: int, rtl: bool):
@@ -889,10 +947,12 @@ class VideoRenderer:
             out.alpha_composite(c1, (pos[1][0] + (cards[1].width - c1.width) // 2, pos[1][1] + (cards[1].height - c1.height) // 2))
         return out
 
-    def _stat_layer(self, stat, t: float, cache: dict, hi, w: int, h: int, rtl: bool) -> Image.Image:
-        """Animated stat: the number counts up inside a filling ring, the label sits underneath."""
-        p = _ease_out(max(0.0, t - 0.15) / 1.3)
-        pop = 0.75 + 0.25 * _ease_back(t / 0.5)  # spring-in
+    def _stat_layer(self, stat, t: float, cache: dict, hi, w: int, h: int, rtl: bool, hook: bool = False) -> Image.Image:
+        """Animated stat: the number counts up quickly inside a filling ring, the label sits underneath."""
+        p = _ease_out(max(0.0, t - 0.05) / 0.6)
+        if hook:
+            p = 0.6 + 0.4 * p
+        pop = 1.0 if hook else 0.75 + 0.25 * _ease_back(t / 0.35)  # spring-in
         key = ("stat", _stat_text(stat, p), round(p, 2), round(pop, 2))
         if key in cache:
             return cache[key]
@@ -960,7 +1020,7 @@ class VideoRenderer:
         return out
 
     def _frame(self, bg, glow, brand, layer, t, dur, progress, is_cta, secondary, w, h, margin, last,
-               enter_t=None, quick=False, center=None, glow2=None, phone=None):
+               enter_t=None, quick=False, center=None, glow2=None, phone=None, hook=False):
         frame = bg.copy().convert("RGBA")
         # drifting lights (continuous across scenes)
         lk = getattr(self, "look", None) or {"glow_speed": 1.0, "enter": (0.55, 70, False), "bar_track": (255, 255, 255, 60)}
@@ -976,8 +1036,8 @@ class VideoRenderer:
         if phone is not None:
             img, (px, py) = phone
             frame.paste(img, (px, py), img)
-        if brand is not None:
-            frame.alpha_composite(brand, (w - margin - brand.width, margin) if brand.width < w else (0, margin))
+        if brand is not None:  # top centre: platform buttons live in the corners
+            frame.alpha_composite(brand, ((w - brand.width) // 2, int(margin * 0.75)))
         # scene text: slide up + fade in, fade out at the end (the last scene stays)
         enter_t = t if enter_t is None else enter_t
         e_s, e_dy, e_pop = lk["enter"]
@@ -986,7 +1046,12 @@ class VideoRenderer:
         alpha = enter * leave
         dy = int((1 - enter) * (25 if quick else e_dy))
         lay = layer
-        if e_pop and not quick and enter_t < e_s:  # energetic: text springs in
+        if hook and not quick:  # first scene = the cover frame: fully visible at once, landing with a punch
+            alpha, dy = leave, 0
+            sc = 1 + 0.14 * (1 - _ease_out(t / 0.4))
+            if sc > 1.001:
+                lay = layer.resize((max(1, int(layer.width * sc)), max(1, int(layer.height * sc))), Image.BILINEAR)
+        if e_pop and not quick and not hook and enter_t < e_s:  # energetic: text springs in
             sc = 0.7 + 0.3 * _ease_back(enter_t / e_s)
             lay = layer.resize((max(1, int(layer.width * sc)), max(1, int(layer.height * sc))), Image.BILINEAR)
         if is_cta:  # gentle pulse
@@ -996,8 +1061,8 @@ class VideoRenderer:
         cx, cy = center or (w // 2, h // 2)
         x, y = cx - lay.width // 2, cy - lay.height // 2 + dy
         frame.paste(lay, (x, y), lay)
-        # progress bar
-        bar_y = h - margin // 2
+        # progress bar (top: the bottom of a Reel is covered by the caption and buttons)
+        bar_y = int(margin * 0.3)
         d = ImageDraw.Draw(frame, "RGBA")
         d.rounded_rectangle((margin, bar_y, w - margin, bar_y + 8), radius=4, fill=lk["bar_track"])
         filled = int((w - 2 * margin) * progress)

@@ -20,6 +20,8 @@ class BrandProfileIn(BaseModel):
     secondary_color: str = Field(default="#F59E0B", pattern="^#[0-9A-Fa-f]{6}$")
     logo_media_id: str | None = Field(default=None, max_length=40)  # image from the media library
     video_style: Literal["modern", "calm", "energetic", "corporate"] = "modern"
+    website: str = Field(default="", max_length=120)
+    offer: str = Field(default="", max_length=120)
 
 
 class AudienceIn(BaseModel):

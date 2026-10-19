@@ -222,6 +222,70 @@ def _to_wav(path: Path) -> bytes:
     return _pcm_to_wav(r.stdout)
 
 
+def _pcm(data: bytes) -> bytes:
+    with wave.open(io.BytesIO(data)) as w:
+        if w.getframerate() != RATE or w.getsampwidth() != 2 or w.getnchannels() != 1:
+            raise VoiceError("unexpected voice clip format")
+        return w.readframes(w.getnframes())
+
+
+def compress_pauses(data: bytes, words: list, max_gap: float = 0.24, edge: float = 0.06):
+    """Shorten every pause between spoken words to `max_gap` and trim the silence before the first / after the last
+    word, shifting the word timings to match. Social video lives on pace; TTS voices pause ~1 s at every full stop."""
+    if not words:
+        return data, words
+    pcm = _pcm(data)
+    n = len(pcm) // 2
+    cuts = []  # (start_s, end_s) to remove
+    if words[0][0] > edge:
+        cuts.append((0.0, words[0][0] - edge))
+    for (_, b, _), (a, _, _) in zip(words, words[1:]):
+        if a - b > max_gap:
+            cuts.append((b + max_gap / 2, a - max_gap / 2))
+    end = words[-1][1] + 0.15
+    if n / RATE > end:
+        cuts.append((end, n / RATE))
+    fade = 96  # samples of fade at each join (no clicks)
+    out, at = bytearray(), 0
+    for a, b in cuts:
+        ia, ib = int(a * RATE), int(b * RATE)
+        out += _fade(pcm[at * 2:ia * 2], fade, out_side=True)
+        at = ib
+    out += _fade(pcm[at * 2:], fade, out_side=False) if cuts else pcm[at * 2:]
+
+    def shift(t: float) -> float:
+        removed = sum(min(b, t) - a for a, b in cuts if t > a)
+        return round(t - removed, 4)
+
+    return _pcm_to_wav(bytes(out)), [(shift(a), shift(b), tok) for a, b, tok in words]
+
+
+def _fade(chunk: bytes, n: int, out_side: bool) -> bytes:
+    """Short linear fade-in at the start and fade-out at the end of a slice."""
+    import array
+
+    s = array.array("h", chunk[: len(chunk) // 2 * 2])
+    n = min(n, len(s) // 2)
+    for i in range(n):
+        s[i] = int(s[i] * i / n)
+        if out_side:
+            s[-1 - i] = int(s[-1 - i] * i / n)
+    return s.tobytes()
+
+
+def trim_silence(data: bytes, threshold: int = 500, pad: float = 0.04) -> bytes:
+    """Cut leading/trailing near-silence of a clip (providers without word timings)."""
+    import array
+
+    s = array.array("h", _pcm(data))
+    loud = [i for i in range(0, len(s), 240) if abs(s[i]) > threshold]
+    if not loud:
+        return data
+    a = max(0, loud[0] - int(pad * RATE))
+    b = min(len(s), loud[-1] + int((pad + 0.08) * RATE))
+    return _pcm_to_wav(s[a:b].tobytes())
+
+
 def wav_seconds(data: bytes) -> float:
     with wave.open(io.BytesIO(data)) as w:
         return w.getnframes() / float(w.getframerate())

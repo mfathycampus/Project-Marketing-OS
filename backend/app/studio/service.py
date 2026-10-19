@@ -28,7 +28,7 @@ from app.video.themes import THEMES
 from app.video.renderer import SIZES, VideoRenderer, VideoRequest, ffmpeg_exe
 
 log = logging.getLogger("studio")
-PROMPT = Path(__file__).resolve().parents[1] / "ai" / "prompts" / "studio.v4.md"
+PROMPT = Path(__file__).resolve().parents[1] / "ai" / "prompts" / "studio.v5.md"
 LENGTHS = {"short": 4, "medium": 6, "long": 10}  # scene counts for ~15 / ~30 / ~60 seconds
 MAX_SCENES = 12
 
@@ -103,6 +103,8 @@ class VideoSpec(BaseModel):
     logo: str = ""  # media-library image id of the brand logo
     compare: list[str] = Field(default_factory=list, max_length=MAX_SCENES)  # "before|after" per scene ('' = none)
     style: str = "modern"  # ready-made look (app/video/themes.py)
+    end_url: str = Field(default="", max_length=80)  # link on the final card, e.g. maeen.app
+    end_offer: str = Field(default="", max_length=80)  # optional offer on the final card
     cta: str = Field(default="", max_length=80)
     brand_name: str = Field(default="", max_length=80)
     aspect: str = "9:16"
@@ -219,7 +221,8 @@ class Studio:
                 broll=terms, captions=spec.captions,
                 media=[get_library().resolve(m) or "" for m in spec.media], stats=spec.stats,
                 logo=get_library().resolve(spec.logo) or "", style=spec.style, compare=spec.compare,
-                media_focus=[get_library().focus_of(m) for m in spec.media]), on_progress=progress)
+                media_focus=[get_library().focus_of(m) for m in spec.media], end_url=spec.end_url,
+                end_offer=spec.end_offer), on_progress=progress)
             self.storage.put(f"studio/{vid}/master.mp4", res.mp4)
             self.storage.put(f"studio/{vid}/captions.srt", res.srt().encode("utf-8"))
             meta.update(status="ready", progress=1.0, width=res.width, height=res.height, duration_ms=res.duration_ms)
