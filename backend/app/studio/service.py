@@ -28,7 +28,7 @@ from app.video.themes import THEMES
 from app.video.renderer import SIZES, VideoRenderer, VideoRequest, ffmpeg_exe
 
 log = logging.getLogger("studio")
-PROMPT = Path(__file__).resolve().parents[1] / "ai" / "prompts" / "studio.v5.md"
+PROMPT = Path(__file__).resolve().parents[1] / "ai" / "prompts" / "studio.v6.md"
 LENGTHS = {"short": 4, "medium": 6, "long": 10}  # scene counts for ~15 / ~30 / ~60 seconds
 MAX_SCENES = 12
 
@@ -69,6 +69,9 @@ class StudioScript(BaseModel):
     compare: list[str] = Field(default_factory=list, description=(
         "Per scene, same order and count as scenes: a before/after contrast 'before|after' (a few words each) for at "
         "most ONE scene, or an empty string"))
+    hooks: list[str] = Field(default_factory=list, description=(
+        "Two ALTERNATIVE first scenes (hooks) for A/B testing, each from a different angle than scenes[0] "
+        "(e.g. a question, a surprising number the user gave, a pain); same language, 3-7 words, *one marked word*"))
 
 
 def write_script(llm: LLMProvider, prompt: str, aspect: str, length: str) -> dict:
@@ -91,7 +94,8 @@ def write_script(llm: LLMProvider, prompt: str, aspect: str, length: str) -> dic
             "broll": terms + [""] * (len(scenes) - len(terms)), "cta": data.cta.strip(),
             "media": media + [""] * (len(scenes) - len(media)),
             "stats": ([x.strip() for x in data.stats] + [""] * len(scenes))[: len(scenes)],
-            "compare": ([x.strip() for x in data.compare] + [""] * len(scenes))[: len(scenes)]}
+            "compare": ([x.strip() for x in data.compare] + [""] * len(scenes))[: len(scenes)],
+            "hooks": [x.strip() for x in data.hooks if x.strip() and x.strip() != (scenes[0] if scenes else "")][:2]}
 
 
 class VideoSpec(BaseModel):
@@ -105,6 +109,9 @@ class VideoSpec(BaseModel):
     style: str = "modern"  # ready-made look (app/video/themes.py)
     end_url: str = Field(default="", max_length=80)  # link on the final card, e.g. maeen.app
     end_offer: str = Field(default="", max_length=80)  # optional offer on the final card
+    music: str = "auto"  # auto | none | generated | media-library audio id
+    hooks: list[str] = Field(default_factory=list, max_length=3)  # alternative first scenes -> one extra video each
+    vary_backgrounds: bool = True  # a different background per scene
     cta: str = Field(default="", max_length=80)
     brand_name: str = Field(default="", max_length=80)
     aspect: str = "9:16"
@@ -185,18 +192,31 @@ class Studio:
         scenes = [s.strip() for s in spec.scenes if s.strip()]
         if not scenes:
             raise StudioError("اكتب مشهدًا واحدًا على الأقل")
-        vid = uuid.uuid4().hex
-        meta = {"id": vid, "title": spec.title.strip() or "فيديو", "status": "queued", "progress": 0.0, "error": None,
-                "created_at": time.time(), "spec": spec.model_dump() | {"scenes": scenes}, "width": None, "height": None,
-                "duration_ms": None}
-        self._save(meta)
-        with self._lock:
-            self._active.add(vid)
-        if run_async:
-            self._pool.submit(self._render, vid)
-        else:
-            self._render(vid)
-        return self.get(vid)
+        variants = [None] + [h.strip() for h in spec.hooks if h.strip() and h.strip() != scenes[0]]
+        group = uuid.uuid4().hex if len(variants) > 1 else None
+        first = None
+        for k, hook in enumerate(variants):
+            v_scenes, v_spec = list(scenes), spec.model_dump()
+            if hook:  # same video, different opening: the hook scene loses the original's number/contrast
+                v_scenes[0] = hook
+                for key in ("stats", "compare"):
+                    if v_spec.get(key):
+                        v_spec[key] = [""] + list(v_spec[key][1:])
+            label = "ABC"[k] if group else None
+            vid = uuid.uuid4().hex
+            title = spec.title.strip() or "فيديو"
+            meta = {"id": vid, "title": f"{title} ({label})" if label else title, "status": "queued", "progress": 0.0,
+                    "error": None, "created_at": time.time() + k * 0.001, "group": group, "variant": label,
+                    "spec": v_spec | {"scenes": v_scenes, "hooks": []}, "width": None, "height": None, "duration_ms": None}
+            self._save(meta)
+            with self._lock:
+                self._active.add(vid)
+            if run_async:
+                self._pool.submit(self._render, vid)
+            else:
+                self._render(vid)
+            first = first or vid
+        return self.get(first)
 
     def _render(self, vid: str) -> None:
         meta = self.get(vid)
@@ -222,7 +242,9 @@ class Studio:
                 media=[get_library().resolve(m) or "" for m in spec.media], stats=spec.stats,
                 logo=get_library().resolve(spec.logo) or "", style=spec.style, compare=spec.compare,
                 media_focus=[get_library().focus_of(m) for m in spec.media], end_url=spec.end_url,
-                end_offer=spec.end_offer), on_progress=progress)
+                end_offer=spec.end_offer, vary_backgrounds=spec.vary_backgrounds,
+                music=spec.music if spec.music in ("auto", "none", "generated") else (get_library().resolve(spec.music) or "auto")),
+                on_progress=progress)
             self.storage.put(f"studio/{vid}/master.mp4", res.mp4)
             self.storage.put(f"studio/{vid}/captions.srt", res.srt().encode("utf-8"))
             meta.update(status="ready", progress=1.0, width=res.width, height=res.height, duration_ms=res.duration_ms)
@@ -297,6 +319,8 @@ def options() -> dict:
         **_voices(),
         "footage": broll.provider_name(),
         "styles": {k: v["label"] for k, v in THEMES.items()},
+        "music": {"auto": "تلقائي (مقطعك إن وُجد، وإلا موسيقى مولّدة)", "generated": "موسيقى مولّدة", "none": "بدون موسيقى",
+                  **{m["id"]: f"🎵 {m['description'] or m['filename']}" for m in get_library().list() if m["kind"] == "audio"}},
         "ai_ready": settings.ai_provider == "fake" or bool(settings.anthropic_api_key),
         "formats": FORMATS,
         "qualities": {k: v["label"] for k, v in QUALITIES.items()},

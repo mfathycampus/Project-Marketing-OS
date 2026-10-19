@@ -473,8 +473,9 @@ function BrandBrain({ pid }) {
 }
 
 /* ---------- Media library: screenshots & screen recordings of your own app, shown inside a phone in videos ---------- */
-function MediaPicker({ value, onChange, media }) {
-  if (!media || !media.length) return null;
+function MediaPicker({ value, onChange, media: all }) {
+  const media = (all || []).filter((m) => m.kind !== "audio");
+  if (!media.length) return null;
   const cur = media.find((m) => m.id === value);
   return html`<div class="field" style="flex:0 0 220px"><div class="row" style="gap:6px;align-items:center;flex-wrap:nowrap">
     ${cur && html`<img src=${`${API}/media/${cur.id}/poster`} alt="" style="width:34px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--line)" />`}
@@ -529,21 +530,23 @@ function MediaLibraryPage() {
       <p class="muted">ارفع صور شاشات (PNG/JPG) أو تسجيلات شاشة (MP4/MOV) من تطبيقك أو منتجك. تظهر داخل إطار هاتف متحرك في الفيديوهات،
         ويختار Claude لكل مشهد اللقطة المناسبة حسب <strong>الوصف</strong>، فاكتب ما يظهر في كل شاشة بوضوح وبوصف مختلف لكل لقطة
         (مثل: «شاشة رفع التسجيل»، «جدول المستندات المكتملة»، «لوحة الإحصاءات»). اللقطات العريضة (من الكمبيوتر) تظهر في نافذة متصفح،
-        والطولية (من الجوال) داخل هاتف.</p>
+        والطولية (من الجوال) داخل هاتف. ويمكنك رفع <strong>موسيقى</strong> (MP3/M4A/WAV) لتُستخدم خلفية للفيديوهات، مثلًا من Pixabay Music.</p>
       <div class="row">
-        <div class="field"><label>الملفات (يمكن اختيار أكثر من ملف)</label><input name="files" type="file" multiple accept="image/png,image/jpeg,image/webp,video/mp4,video/quicktime,video/webm" required /></div>
+        <div class="field"><label>الملفات (يمكن اختيار أكثر من ملف)</label><input name="files" type="file" multiple accept="image/png,image/jpeg,image/webp,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/mp4,audio/wav,audio/ogg,.mp3,.m4a,.wav,.ogg" required /></div>
         <div class="field"><label>الوصف (ما يظهر في الشاشة)</label><input value=${desc} maxlength="300" onInput=${(e) => setDesc(e.target.value)} placeholder="مثال: شاشة رفع الفيديو وتحويله إلى مستند Word" /></div>
         <button class="primary" disabled=${busy}>${busy ? html`<${Busy} text="جارٍ الرفع..." />` : "رفع"}</button>
       </div>
     </form>
     ${items === null ? html`<${Busy} text="تحميل..." />` : items.length === 0 ? html`<p class="muted">المكتبة فارغة.</p>` : html`
       <div class="grid">${items.map((m) => html`<div class="card item" key=${m.id}>
-        ${m.kind === "video" ? html`<video controls preload="none" poster=${`${API}/media/${m.id}/poster`} src=${`${API}/media/${m.id}/file`}></video>`
+        ${m.kind === "audio" ? html`<div class="ph" style="aspect-ratio:auto;padding:22px 8px;flex-direction:column;gap:10px">🎵<audio controls preload="none" src=${`${API}/media/${m.id}/file`} style="width:100%"></audio></div>`
+          : m.kind === "video" ? html`<video controls preload="none" poster=${`${API}/media/${m.id}/poster`} src=${`${API}/media/${m.id}/file`}></video>`
           : html`<div class="focus-wrap"><img src=${`${API}/media/${m.id}/poster`} alt="" title="اضغط على الصورة لتحديد نقطة التركيز"
               onClick=${(e) => setFocus(m, e)} />
               ${m.focus && html`<span class="focus-dot" style=${{ left: `${m.focus[0] * 100}%`, top: `${m.focus[1] * 100}%` }}></span>`}</div>`}
-        <p class="muted" style="max-height:none">${m.kind === "video" ? "🎬 تسجيل" : "🖼️ صورة"} · ${m.width}×${m.height}${m.duration_ms ? ` · ${(m.duration_ms / 1000).toFixed(0)} ث` : ""}
-          · ${m.width >= m.height * 1.05 ? "🖥️ تظهر في نافذة متصفح" : "📱 تظهر في هاتف"}</p>
+        <p class="muted" style="max-height:none">${m.kind === "audio" ? `🎵 موسيقى · ${((m.duration_ms || 0) / 1000).toFixed(0)} ث · تُستخدم خلفية للفيديوهات`
+          : html`${m.kind === "video" ? "🎬 تسجيل" : "🖼️ صورة"} · ${m.width}×${m.height}${m.duration_ms ? ` · ${(m.duration_ms / 1000).toFixed(0)} ث` : ""}
+          · ${m.width >= m.height * 1.05 ? "🖥️ تظهر في نافذة متصفح" : "📱 تظهر في هاتف"}`}</p>
         ${m.kind === "image" && html`<p class="muted" style="max-height:none;font-size:13px">${m.focus
           ? html`🎯 نقطة التركيز محددة: يتحرك المؤشر إليها وينقر ثم يقرّب. <a href="#" onClick=${(e) => { e.preventDefault(); clearFocus(m); }}>إزالة</a>`
           : "🎯 اضغط على الصورة على الزر أو الجزء المهم ليشير إليه الفيديو ويقرّب عليه"}</p>`}
@@ -569,6 +572,9 @@ function Studio() {
   const [colors, setColors] = useState({ primary_color: "#0F766E", secondary_color: "#F59E0B" });
   const [logo, setLogo] = useState(null);
   const [style, setStyle] = useState("modern");
+  const [music, setMusic] = useState("auto");
+  const [varyBg, setVaryBg] = useState(true);
+  const [abTest, setAbTest] = useState(true);
   const remembered = (() => { try { return JSON.parse(localStorage.getItem("studio-end") || "{}"); } catch { return {}; } })();
   const [endUrl, setEndUrl] = useState(remembered.url || "");
   const [endOffer, setEndOffer] = useState(remembered.offer || "");
@@ -592,7 +598,8 @@ function Studio() {
   const make = async () => {
     setBusy("video");
     try {
-      await api("/studio/videos", { method: "POST", body: { ...script, title: script.title || prompt.slice(0, 50) || "فيديو", aspect, voice: curVoice, captions, footage, ...colors, logo: logo || "", style, end_url: endUrl, end_offer: endOffer } });
+      await api("/studio/videos", { method: "POST", body: { ...script, title: script.title || prompt.slice(0, 50) || "فيديو", aspect, voice: curVoice, captions, footage, ...colors, logo: logo || "", style, end_url: endUrl, end_offer: endOffer, music,
+        vary_backgrounds: varyBg, hooks: abTest ? (script.hooks || []).filter((x) => x.trim()) : [] } });
       try { localStorage.setItem("studio-end", JSON.stringify({ url: endUrl, offer: endOffer })); } catch {}
       toastSetter("بدأ إنشاء الفيديو — يظهر التقدم بالأسفل", true);
       reload();
@@ -630,6 +637,13 @@ function Studio() {
           ${script.scenes.length > 1 && html`<button type="button" class="danger" onClick=${() => delScene(i)}>حذف</button>`}
         </div></li>`)}</ol>
       ${script.scenes.length < 12 && html`<button type="button" onClick=${addScene}>+ مشهد</button>`}
+      <div class="card" style="margin-top:12px;background:var(--bg)">
+        <label class="check"><input type="checkbox" checked=${abTest} onChange=${(e) => setAbTest(e.target.checked)} />
+          <strong>اختبار A/B:</strong> أنشئ نسخة إضافية لكل افتتاحية بديلة (نفس الفيديو، أول مشهد مختلف) لتعرف أيها يجذب أكثر</label>
+        ${abTest && [0, 1].map((k) => html`<div class="field" style="margin-top:6px"><input value=${(script.hooks || [])[k] || ""}
+          onInput=${(e) => setScript((s) => { const hk = [...(s.hooks || ["", ""])]; hk[k] = e.target.value; return { ...s, hooks: hk }; })}
+          placeholder=${`افتتاحية بديلة ${k === 0 ? "B" : "C"} (اختياري): سؤال حاد، رقم، أو ألم`} /></div>`)}
+      </div>
       <div class="row" style="margin-top:12px">
         <div class="field"><label>الدعوة لاتخاذ إجراء (آخر مشهد)</label><input value=${script.cta} onInput=${(e) => setScript({ ...script, cta: e.target.value })} placeholder="اطلب الآن" /></div>
         <div class="field"><label>التعليق الصوتي</label><select value=${curVoice} onChange=${(e) => setVoice(e.target.value)}>
@@ -640,11 +654,14 @@ function Studio() {
         <${LogoPicker} value=${logo} media=${media} onChange=${setLogo} />
         <div class="field" style="flex:0 0 200px"><label>الرابط في البطاقة الختامية</label><input dir="ltr" value=${endUrl} onInput=${(e) => setEndUrl(e.target.value)} placeholder="maeen.app" /></div>
         <div class="field" style="flex:0 0 220px"><label>العرض (اختياري)</label><input value=${endOffer} onInput=${(e) => setEndOffer(e.target.value)} placeholder="جرّب مجانًا 7 أيام" /></div>
+        ${opt.music && html`<div class="field" style="flex:0 0 230px"><label>الموسيقى</label><select value=${music} onChange=${(e) => setMusic(e.target.value)}>
+          ${Object.entries(opt.music).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>`}
         ${opt.styles && html`<div class="field" style="flex:0 0 180px"><label>القالب</label><select value=${style} onChange=${(e) => setStyle(e.target.value)}>
           ${Object.entries(opt.styles).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></div>`}
       </div>
       <div class="row" style="margin-top:8px">
         <label class="check"><input type="checkbox" checked=${captions} onChange=${(e) => setCaptions(e.target.checked)} /> ترجمة متزامنة مع الصوت (الكلمة المنطوقة مميزة)</label>
+        <label class="check"><input type="checkbox" checked=${varyBg} onChange=${(e) => setVaryBg(e.target.checked)} /> خلفية مختلفة لكل مشهد</label>
         <label class="check"><input type="checkbox" checked=${footage} disabled=${!opt.footage} onChange=${(e) => setFootage(e.target.checked)} /> لقطات خلفية ${opt.footage ? `من ${opt.footage}` : "(غير مفعّلة — شغّل set-pixabay.bat)"}</label>
       </div>
       ${!opt.voice_engine && html`<p class="muted">الصوت غير متاح: شغّل start.bat لتثبيت edge-tts.</p>`}
@@ -680,6 +697,7 @@ function StudioCard({ v, opt, reload }) {
       : html`<div class="ph"><div style="width:100%"><${Busy} text=${v.status === "queued" ? "في الانتظار..." : `جارٍ الإنشاء ${Math.round((v.progress || 0) * 100)}%`} />
           <div class="bar"><span style=${{ width: `${Math.round((v.progress || 0) * 100)}%` }}></span></div></div></div>`}
     <h3>${v.title}</h3>
+    ${v.variant && html`<p class="muted" style="max-height:none;font-size:13px">🧪 نسخة ${v.variant} من اختبار A/B: انشر النسخ في أيام متقاربة وقارن المشاهدات ونسبة الإكمال.</p>`}
     ${v.duration_ms > 35000 && html`<p class="error" style="max-height:none;font-size:13px">⏱️ ${(v.duration_ms / 1000).toFixed(0)} ثانية: أطول من المناسب للريلز (15–30 ث). قلّل المشاهد أو اختصر الجمل.</p>`}
     <p>${v.spec.aspect}${v.duration_ms ? ` · ${(v.duration_ms / 1000).toFixed(1)} ث` : ""}${v.spec.voice ? ` · ${opt.voices[v.spec.voice] || v.spec.voice}` : " · بدون صوت"}</p>
     ${v.status === "ready" && html`<div class="row" style="margin-bottom:10px">

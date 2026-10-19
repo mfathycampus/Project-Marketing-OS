@@ -20,7 +20,7 @@ from typing import Callable
 from PIL import Image, ImageDraw, ImageFilter
 
 from app.designs.pillow_renderer import DARK, INK, Block, _Canvas, _font, _gradient, _rgb, _shape
-from app.video import broll, themes, voice
+from app.video import backgrounds, broll, themes, voice
 
 log = logging.getLogger(__name__)
 FPS = 30
@@ -62,6 +62,8 @@ class VideoRequest:
     media_focus: list = field(default_factory=list)  # per scene: (x, y) in 0..1 = the spot to point/tap/zoom at, or None
     end_url: str = ""  # shown big on the final card (e.g. maeen.app)
     end_offer: str = ""  # optional offer line on the final card (e.g. "جرّب مجانًا 7 أيام")
+    vary_backgrounds: bool = True  # a different on-brand background per scene (False = the theme's single look)
+    music: str = "auto"  # auto (your tracks, else generated) | none | generated | path of an audio file
 
 
 @dataclass
@@ -107,7 +109,15 @@ def scenes_for(headline: str, description: str, price: str, cta: str, scripted: 
 
 
 def pick_music(seed: str) -> Path | None:
+    """One of your tracks (music folder + audio in the media library), the same one for the same video."""
     tracks = sorted(p for p in MUSIC_DIR.glob("*") if p.suffix.lower() in AUDIO_EXT) if MUSIC_DIR.is_dir() else []
+    try:
+        from app.media.library import get_library
+
+        tracks += [Path(get_library().resolve(m["id"])) for m in get_library().list() if m["kind"] == "audio"]
+    except Exception:  # noqa: BLE001 - the library is optional here
+        pass
+    tracks = [t for t in tracks if t and t.is_file()]
     if not tracks:
         return None
     return tracks[int(hashlib.sha256(seed.encode()).hexdigest(), 16) % len(tracks)]
@@ -632,9 +642,9 @@ class VideoRenderer:
         n_frames = int(total * FPS)
         cmd = [ffmpeg_exe(), "-v", "error", "-y",
                "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(FPS), "-i", "-"]
-        music = pick_music(req.music_seed or "|".join(req.scenes))
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "out.mp4"
+            music = self._music(req, total, look["name"], Path(tmp))
             fades = f"afade=t=in:d=0.6,afade=t=out:st={max(0.0, total - 1.2):.2f}:d=1.2"
             if music:
                 cmd += ["-stream_loop", "-1", "-i", str(music)]
@@ -663,6 +673,9 @@ class VideoRenderer:
                 prev_last = None  # last frame of the previous scene, for the transition
                 glow2 = self._glow(int(w * 0.7), _mix(primary, white, 0.35))
                 kind, tr = look["transition"]
+                bg_plan = backgrounds.plan(look["name"], len(layers), req.vary_backgrounds)
+                seed = int(hashlib.sha256((req.music_seed or "|".join(req.scenes)).encode()).hexdigest(), 16) % 1000
+                bg_big = {k: backgrounds.build(k, w, h, primary, secondary, dark, seed) for k in set(bg_plan)}
                 for idx, (layer, dur, is_cta) in enumerate(layers):
                     path = footage[idx]
                     reader = _ClipReader(path, w, h, dur) if path else None
@@ -681,7 +694,9 @@ class VideoRenderer:
                             if frame_no >= n_frames:
                                 break
                             t = f / FPS
-                            base = bg
+                            bk = bg_plan[idx]
+                            base = backgrounds.frame_at(bg_big[bk], start + t, w, h, lk["glow_speed"],
+                                                        vertical=not bk.startswith("light"))
                             if reader is not None:
                                 shot = reader.next()
                                 if shot is not None:
@@ -696,11 +711,12 @@ class VideoRenderer:
                                 lay, enter_t, quick = self._caption_at(groups[idx], t, cache, idx == 0, lk["pill"],
                                                                        tw + 2 * margin, margin, req.rtl, sizes_k[idx],
                                                                        emph[idx])
-                            frame = self._frame(base, glow if lk["glows"] else None, brand, lay, t, dur,
+                            busy = bk in ("mesh", "rays")  # already full of light: no extra glows
+                            frame = self._frame(base, glow if lk["glows"] and not busy else None, brand, lay, t, dur,
                                                 (start + t) / total, is_cta, lk["pill"], w, h, margin,
                                                 last=idx == len(layers) - 1, enter_t=enter_t, quick=quick,
                                                 center=(cx, cy),
-                                                glow2=glow2 if reader is None and lk["glows"] >= 2 else None,
+                                                glow2=glow2 if reader is None and lk["glows"] >= 2 and not busy else None,
                                                 phone=phone.render(t, enters) if phone else None,
                                                 hook=idx == 0 and not compare[idx])
                             if prev_last is not None and t < tr:
@@ -725,6 +741,25 @@ class VideoRenderer:
                 raise VideoError(f"فشل ترميز الفيديو: {err.strip()[-400:]}")
             data = out.read_bytes()
         return VideoResult(mp4=data, width=w, height=h, duration_ms=int(total * 1000), captions=captions)
+
+    @staticmethod
+    def _music(req: VideoRequest, total: float, style: str, tmp: Path) -> Path | None:
+        """The music bed: a chosen file, your tracks (media library / music folder), or a generated one."""
+        choice = (req.music or "auto").strip()
+        if choice == "none":
+            return None
+        if choice not in ("auto", "generated"):
+            return Path(choice) if Path(choice).is_file() else None
+        seed = req.music_seed or "|".join(req.scenes)
+        if choice == "auto":
+            found = pick_music(seed)
+            if found:
+                return found
+        from app.video import music_gen
+
+        path = tmp / "music.wav"
+        path.write_bytes(music_gen.generate(total + 1.5, style, int(hashlib.sha256(seed.encode()).hexdigest(), 16) % 10_000))
+        return path
 
     @staticmethod
     def _footage(req: VideoRequest, idx: int, w: int, h: int, dur: float) -> Path | None:

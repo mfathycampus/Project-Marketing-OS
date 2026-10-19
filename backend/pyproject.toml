@@ -30,4 +30,5 @@ dev = ["pytest>=8", "httpx>=0.27"]
 include = ["app*"]
 
 [tool.pytest.ini_options]
+markers = ["real_music: use the real music generator (slow)"]
 testpaths = ["tests"]

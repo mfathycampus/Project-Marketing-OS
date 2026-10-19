@@ -57,3 +57,25 @@ def isolated_media_library(tmp_path, monkeypatch):
     lib = library.MediaLibrary(LocalStorage(str(tmp_path / "media-store")))
     monkeypatch.setattr(library, "_lib", lib)
     return lib
+
+
+@pytest.fixture(autouse=True)
+def quick_music(monkeypatch, request):
+    """Generated music costs ~1.5 s per video; tests get a short silent bed (test_music_gen uses the real one)."""
+    if request.node.get_closest_marker("real_music"):
+        return
+    import io
+    import wave
+
+    from app.video import music_gen
+
+    def silent(seconds, style="modern", seed=0):
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(8000)
+            w.writeframes(b"\x00\x00" * int(8000 * seconds))
+        return buf.getvalue()
+
+    monkeypatch.setattr(music_gen, "generate", silent)
